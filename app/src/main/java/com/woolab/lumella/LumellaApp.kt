@@ -5,7 +5,7 @@ import com.ffalcon.mercury.android.sdk.MercurySDK
 
 /**
  * Application entry point for the RayNeo native-glasses build. Registered as
- * `android:name` in the manifest (required so the launcher classifies LUMELLA as a
+ * `android:name` in the manifest (required so the launcher classifies KLLA as a
  * native app rather than a "virtual machine"/touchpad-relay app — see
  * `com.rayneo.mercury.app` meta-data on the `<application>` tag).
  *

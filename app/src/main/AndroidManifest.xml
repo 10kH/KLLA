@@ -14,7 +14,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Lumella">
 
-        <!-- Marks LUMELLA as a RayNeo native-glasses app (not a "virtual machine"/
+        <!-- Marks KLLA (this app) as a RayNeo native-glasses app (not a "virtual machine"/
              touchpad-relay app requiring a paired phone's App Home - Touchpad). -->
         <meta-data
             android:name="com.rayneo.mercury.app"
