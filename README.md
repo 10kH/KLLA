@@ -6,9 +6,8 @@ English sibling is **ELLA** ([`10kH/ELLA`](https://github.com/10kH/ELLA)). This 
 called `lumella` until 2026-10-13; that old name is still inside it (the package `com.woolab.lumella`, the ops scripts)
 and is not shown to learners. Names: [BRAND.md](https://github.com/10kH/KLLA-server/blob/main/docs/BRAND.md).
 
-Gradle multi-module skeleton for the lumella glasses client. Scaffolded in P2
-around the already-moved luma engine at `TUTOR/lumella/luma/` (read-only
-baseline for wrapper/version-catalog).
+Gradle multi-module project for the KLLA glasses client. Its coach server is the sibling
+checkout `../KLLA-server` ([`10kH/KLLA-server`](https://github.com/10kH/KLLA-server)).
 
 ## Module map
 
@@ -54,4 +53,4 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"
 ```
 
 Requires JDK 17 and Android SDK platform 34 (compileSdk) / minSdk 30,
-matching the baseline in `TUTOR/lumella/luma/ELLA-main/`.
+the same as ELLA.

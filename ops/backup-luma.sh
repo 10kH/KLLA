@@ -17,9 +17,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# The server checkout sits next to this one: KLLA-server since the 10/13 rename; the Mac mini's
-# clone still has its old folder name, luma.
-LUMA_API_DIR="$(cd "$SCRIPT_DIR/../../KLLA-server/luma-api" 2>/dev/null || cd "$SCRIPT_DIR/../../luma/luma-api" && pwd)"
+# The server checkout sits next to this one (~/workspace/KLLA-server on every machine since 10/13).
+LUMA_API_DIR="$(cd "$SCRIPT_DIR/../../KLLA-server/luma-api" 2>/dev/null && pwd)" \
+  || { echo "ERROR: KLLA-server/luma-api not found next to this repo" >&2; exit 1; }
 DB="$LUMA_API_DIR/data/luma.db"
 BACKUP_ROOT="${LUMA_BACKUP_DIR:-$HOME/Backups/luma}"
 KEEP_DAYS="${LUMA_BACKUP_KEEP_DAYS:-14}"

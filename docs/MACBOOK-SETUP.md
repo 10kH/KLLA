@@ -70,8 +70,8 @@ gh repo clone 10kH/aaai27
 앱을 빌드하려면 있어야 한다. 맥미니에서 값을 복사해 온다.
 
 ```bash
-# 맥미니에서 (맥미니의 사본은 아직 옛 폴더 이름 lumella)
-cat ~/workspace/lumella/local.properties
+# 맥미니에서
+cat ~/workspace/KLLA/local.properties
 ```
 
 키는 일곱이지만 **맥미니에서 실제로 가져와야 하는 값은 `localToken` 하나뿐이다.**

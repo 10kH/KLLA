@@ -5,7 +5,7 @@
 | Credential | Location |
 |---|---|
 | `OPENAI_API_KEY` | `token-service/.env.local` **only**. Never in luma, never in glasses/Android config, never committed. |
-| `LUMA_ETRI_*` / other luma backend keys | `../luma/luma-api/.env` (luma's own env, outside glasses' tree). |
+| `LUMA_ETRI_*` / other luma backend keys | `../KLLA-server/luma-api/.env` (the server's own env, outside this tree). |
 | Android app config | **zero** keys. The glasses app holds no API credentials — it only holds the local pairing token (see below). |
 
 ## Local auth pairing
@@ -118,17 +118,16 @@ Confirm the target device/emulator shows `device` (not `unauthorized` /
 From `TUTOR/lumella/` (glasses never edits luma; only runs it):
 
 ```bash
-cd ../luma && python3 scripts/dev_stack.py up --profile usb --port 8010
+cd ../KLLA-server && python3 scripts/dev_stack.py up --profile usb --port 8010
 ```
 
 or, running the API directly:
 
 ```bash
-cd ../luma/luma-api && uvicorn src.main:app --port 8010
+cd ../KLLA-server/luma-api && .venv/bin/python -m uvicorn luma_api.main:app --host 127.0.0.1 --port 8010
 ```
 
-(Exact `uvicorn` module path may differ — check `luma-api/pyproject.toml`
-entrypoint if `src.main:app` doesn't resolve.)
+(The same module path as `KLLA-server/luma-api/README.md` and the luma-api LaunchAgent.)
 
 ## G006 on-device smoke amendment
 
