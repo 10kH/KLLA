@@ -11,6 +11,11 @@
 > 2. `luma-install`이 서버가 뜨기 전에 확인해 "not healthy"라고 했다(몇 초 뒤 정상). 이제 30초까지 기다린다.
 > 3. `uv sync --reinstall`이 손으로 깔아 둔 패키지를 지웠다(luma-evolution, gepa, pytest, ruff 등). openai도 3.6.0 → lock의
 >    2.53.0. 서버는 luma_evolution을 import하지 않아 문제없다. luma-evolution은 자기 폴더의 pyproject로 따로 돌린다.
+>    pytest·ruff가 필요하면 `cd ~/workspace/KLLA-server/luma-api && uv sync --extra dev`.
+>
+> **남은 한 번 (맥미니):** 손으로 고친 lan-address plist를 템플릿 것으로 바꾼다.
+> `cd ~/workspace/KLLA && git pull --ff-only && ops/launchd/manage.sh lan-install && ops/launchd/manage.sh lan-status`
+> (`last exit code = 0`, 로그 끝에 `nothing to do` 또는 `published and verified`가 나오면 끝.)
 
 - 걸리는 시간: 15분 정도. 그중 **5분쯤 KLLA 서버·터널·토큰 서비스가 멈춘다.** 그동안 안경으로 대화하면 안 된다.
 - **모든 명령을 터미널 창 하나에서 순서대로** 친다. 1단계에서 만든 변수(`OLD_GLASSES`, `OLD_SERVER`)를 끝까지 쓴다.
