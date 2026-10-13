@@ -1,9 +1,10 @@
-# KLLA 안경 (코드명 lumella)
+# KLLA — KLLA 안경
 
 **KLLA** (Korean Language Learning Assistant) on RayNeo X3 Pro glasses: a spoken Korean tutor for
-Korean learners. Its server and web are in [`10kH/luma`](https://github.com/10kH/luma) (KLLA 서버, KLLA 웹); its
-English sibling is **ELLA** ([`10kH/ELLA`](https://github.com/10kH/ELLA)). `lumella` is a code name — it stays in this
-repository, the package (`com.woolab.lumella`) and the ops scripts, and is not shown to learners. Names: [BRAND.md](https://github.com/10kH/luma/blob/main/docs/BRAND.md).
+Korean learners. Its server and web are in [`10kH/KLLA-server`](https://github.com/10kH/KLLA-server) (KLLA 서버, KLLA 웹); its
+English sibling is **ELLA** ([`10kH/ELLA`](https://github.com/10kH/ELLA)). This repository was
+called `lumella` until 2026-10-13; that old name is still inside it (the package `com.woolab.lumella`, the ops scripts)
+and is not shown to learners. Names: [BRAND.md](https://github.com/10kH/KLLA-server/blob/main/docs/BRAND.md).
 
 Gradle multi-module skeleton for the lumella glasses client. Scaffolded in P2
 around the already-moved luma engine at `TUTOR/lumella/luma/` (read-only

@@ -1,7 +1,7 @@
-# lumella — 에이전트 작업 규칙
+# KLLA — 에이전트 작업 규칙
 
-안경(RayNeo X3 Pro) 한국어 튜터 앱. 대외 이름 **KLLA 안경**, 코드명 lumella, `com.woolab.lumella`.
-화면·영상·문서에 쓰는 이름은 [BRAND.md](https://github.com/10kH/luma/blob/main/docs/BRAND.md)를 따릅니다 (lumella, luma는 밖에 쓰지 않음).
+안경(RayNeo X3 Pro) 한국어 튜터 앱. 대외 이름 **KLLA 안경**. 저장소 `10kH/KLLA`(옛 이름 lumella), 패키지 `com.woolab.lumella`(옛 이름 그대로).
+화면·영상·문서에 쓰는 이름은 [BRAND.md](https://github.com/10kH/KLLA-server/blob/main/docs/BRAND.md)를 따릅니다 (lumella, luma는 밖에 쓰지 않음).
 단독 repo입니다 (`Woody` 83커밋). **직접 커밋해도 됩니다.**
 
 ## 계약 테스트를 믿지 마십시오

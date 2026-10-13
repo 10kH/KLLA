@@ -46,31 +46,31 @@ sudo pmset -a autorestart 1          # 전원 복구 시 자동 재기동
 
 ```bash
 mkdir -p ~/workspace && cd ~/workspace
-gh repo clone 10kH/luma
-gh repo clone 10kH/lumella
+gh repo clone 10kH/KLLA-server
+gh repo clone 10kH/KLLA
 gh repo clone 10kH/ELLA
 gh repo clone 10kH/aaai27
 ```
 
 | 레포 | 무엇 | 맥북에서 |
 |---|---|---|
-| `lumella` | 안경 앱 | **빌드·설치** — 주로 씀 |
+| `KLLA` (옛 lumella) | 안경 앱 | **빌드·설치** — 주로 씀 |
 | `aaai27` | 논문·영상 시나리오 | **편집** — 마감 9/18 |
-| `luma` | 서버 두뇌 | 안 돌림 (맥미니가 함) |
+| `KLLA-server` (옛 luma) | 서버 두뇌 | 안 돌림 (맥미니가 함) |
 | `ELLA` | 이전 세대 앱 | 참고용 |
 
-`luma`는 **공유 레포다. 직접 커밋하지 않는다.** PR로만. `luma/AGENTS.md` 참조.
+`KLLA-server`는 **공유 레포다. 직접 커밋하지 않는다.** PR로만.
 
 ## 2. 맥북에 없는 것 — 손으로 만든다
 
 레포에 추적되지 않는 파일이 셋 있다. 비밀값이라 일부러 뺐다.
 
-### `lumella/local.properties` (필수)
+### `KLLA/local.properties` (필수)
 
 앱을 빌드하려면 있어야 한다. 맥미니에서 값을 복사해 온다.
 
 ```bash
-# 맥미니에서
+# 맥미니에서 (맥미니의 사본은 아직 옛 폴더 이름 lumella)
 cat ~/workspace/lumella/local.properties
 ```
 
@@ -137,7 +137,7 @@ Toolchain download repositories have not been configured.
 ```
 
 ```bash
-cd ~/workspace/lumella
+cd ~/workspace/KLLA
 ops/install-glasses.sh --wireless
 ```
 
@@ -399,7 +399,7 @@ ops/preflight.sh --find     # 케이블 없이 안경 주소까지 찾아서
 수동으로 보려면 이전 방식도 그대로 유효하다.
 
 ```bash
-TOK=$(grep '^lumella.localToken=' ~/workspace/lumella/local.properties | cut -d= -f2-)
+TOK=$(grep '^lumella.localToken=' ~/workspace/KLLA/local.properties | cut -d= -f2-)
 curl -s -H "X-Lumella-Local-Token: $TOK" https://lumella-token.vercel.app/v1/config
 curl -s <위에서 받은 주소>/v1/capabilities     # coach: true
 adb devices

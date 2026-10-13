@@ -126,8 +126,9 @@ case "${1:-}" in
     LLABEL="com.woolab.lumella.luma-api"
     LTEMPLATE="$SCRIPT_DIR/$LLABEL.plist.template"
     LPLIST="$HOME/Library/LaunchAgents/$LLABEL.plist"
-    LUMA_API_DIR="$(cd "$REPO_ROOT/../luma/luma-api" 2>/dev/null && pwd)"
-    [ -n "$LUMA_API_DIR" ] || { echo "ERROR: luma-api directory not found next to this repo" >&2; exit 1; }
+    # KLLA-server since the 10/13 rename; the Mac mini's clone still has its old folder name, luma.
+    LUMA_API_DIR="$(cd "$REPO_ROOT/../KLLA-server/luma-api" 2>/dev/null || cd "$REPO_ROOT/../luma/luma-api" 2>/dev/null && pwd)"
+    [ -n "$LUMA_API_DIR" ] || { echo "ERROR: KLLA-server/luma-api not found next to this repo" >&2; exit 1; }
     VENV_PY="$LUMA_API_DIR/.venv/bin/python"
     [ -x "$VENV_PY" ] || { echo "ERROR: $VENV_PY missing — create the venv first" >&2; exit 1; }
     mkdir -p "$LOG_DIR" "$(dirname "$LPLIST")"

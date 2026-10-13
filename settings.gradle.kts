@@ -19,7 +19,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "lumella-glasses"
+rootProject.name = "KLLA"
 include(":app", ":tutor-contract", ":luma-adapter", ":contract-tests")
 
 // The slow layer lives in its own repository, checked out beside this one. Both tutoring apps
