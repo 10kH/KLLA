@@ -2,6 +2,16 @@
 
 2026-10-13. GitHub 저장소와 맥북 폴더는 이미 바꿨다. 이 문서는 **맥미니에서 손으로** 할 일이다.
 
+> **완료 — 2026-10-13 19:01~19:03 (서비스 정지 약 2분).** 맥미니의 실제 위치는 `~/workspace/lumella`, `~/workspace/luma`였고
+> 지금은 `~/workspace/KLLA`(dd54e55), `~/workspace/KLLA-server`(f0ccd7f). 백업 두 번(19:01 옮기기 전, 19:03 옮긴 뒤) 모두
+> integrity=ok. 안경이 쓰는 길(Vercel → 새 터널 → 서버)에서 `"coach": true`, 맥북에서 코치 턴 2개 실제 응답(ETRI free_chat).
+> 문서와 달랐던 점 셋 — 아래 본문은 고쳐 두었다:
+> 1. LaunchAgent가 다섯 개였다. `com.woolab.lumella.lan-address`는 손으로 만든 것이라 manage.sh 밖에 있었고 옛 경로를 가리켰다
+>    (그날 손으로 고침). 이제 템플릿과 `manage.sh lan-install`이 있다.
+> 2. `luma-install`이 서버가 뜨기 전에 확인해 "not healthy"라고 했다(몇 초 뒤 정상). 이제 30초까지 기다린다.
+> 3. `uv sync --reinstall`이 손으로 깔아 둔 패키지를 지웠다(luma-evolution, gepa, pytest, ruff 등). openai도 3.6.0 → lock의
+>    2.53.0. 서버는 luma_evolution을 import하지 않아 문제없다. luma-evolution은 자기 폴더의 pyproject로 따로 돌린다.
+
 - 걸리는 시간: 15분 정도. 그중 **5분쯤 KLLA 서버·터널·토큰 서비스가 멈춘다.** 그동안 안경으로 대화하면 안 된다.
 - **모든 명령을 터미널 창 하나에서 순서대로** 친다. 1단계에서 만든 변수(`OLD_GLASSES`, `OLD_SERVER`)를 끝까지 쓴다.
 - 중간에 "멈추세요"라고 적힌 결과가 나오면 거기서 멈추고 결과를 붙여서 알려 주면 된다.
@@ -26,7 +36,7 @@ for f in ~/Library/LaunchAgents/com.woolab.lumella.*.plist; do
 done
 ```
 
-네 개가 나와야 한다: `luma-api`, `luma-tunnel`, `token-service`, `luma-backup`. 그다음:
+다섯 개가 나와야 한다: `luma-api`, `luma-tunnel`, `token-service`, `luma-backup`, `lan-address`. 그다음:
 
 ```bash
 OLD_GLASSES="$(plutil -extract WorkingDirectory raw -o - ~/Library/LaunchAgents/com.woolab.lumella.luma-tunnel.plist)"
@@ -76,6 +86,7 @@ M="$OLD_GLASSES/ops/launchd/manage.sh"
 "$M" luma-uninstall
 "$M" uninstall
 "$M" backup-uninstall
+"$M" lan-uninstall
 launchctl list | grep com.woolab.lumella      # 아무것도 안 나와야 함
 ```
 
@@ -115,6 +126,7 @@ uv sync --reinstall
 ```
 
 - `venv OK`가 나와야 한다. greenlet이 없다고 나오면 2단계의 `pull`이 안 된 것이다(f0ccd7f에서 고쳤다).
+- `--reinstall`은 lock 파일에 없는 패키지를 지운다. 손으로 깔아 둔 도구(luma-evolution, pytest 등)는 여기서 빠진다 — 서버 실행에는 필요 없다.
 
 ## 7. 서비스 다시 켜기 (새 위치에서)
 
@@ -125,6 +137,7 @@ $M luma-install        # → OK: luma-api healthy on :8010
 $M install             # → OK: http://127.0.0.1:8788/healthz is up
 $M tunnel-install      # 터널 주소를 Vercel에 다시 올린다 (30초쯤 걸림)
 $M backup-install
+$M lan-install
 ```
 
 ## 8. 확인
@@ -132,11 +145,11 @@ $M backup-install
 ```bash
 cd ~/workspace/KLLA
 M=ops/launchd/manage.sh
-$M luma-status; $M status; $M tunnel-status
+$M luma-status; $M status; $M tunnel-status; $M lan-status
 
 # LaunchAgent 4개가 옛 폴더를 더 가리키지 않는지 — 아무것도 안 나오면 정상
 grep -lF -e "$OLD_GLASSES" -e "$OLD_SERVER" ~/Library/LaunchAgents/com.woolab.lumella.*.plist
-grep -c 'workspace/KLLA' ~/Library/LaunchAgents/com.woolab.lumella.*.plist   # 네 줄 모두 1 이상
+grep -c 'workspace/KLLA' ~/Library/LaunchAgents/com.woolab.lumella.*.plist   # 다섯 줄 모두 1 이상
 
 # 백업 스크립트가 새 서버 폴더를 찾는지
 $M backup-now && ls -t ~/Backups/luma | head -1

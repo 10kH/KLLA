@@ -23,6 +23,9 @@
 #   ops/launchd/manage.sh tunnel-install    # keep luma-api reachable off-LAN
 #   ops/launchd/manage.sh tunnel-status
 #   ops/launchd/manage.sh tunnel-uninstall
+#   ops/launchd/manage.sh lan-install       # every 5 min: keep the published address answering
+#   ops/launchd/manage.sh lan-status
+#   ops/launchd/manage.sh lan-uninstall
 set -euo pipefail
 
 LABEL="com.woolab.lumella.token-service"
@@ -143,10 +146,14 @@ case "${1:-}" in
     [ -n "$pids" ] && { echo "stopping existing luma-api on :8010 -> $pids"; kill $pids 2>/dev/null || true; sleep 2; }
     launchctl bootout "$GUI/$LLABEL" 2>/dev/null || true
     launchctl bootstrap "$GUI" "$LPLIST"
-    sleep 4
-    curl -fsS -m 5 http://127.0.0.1:8010/v1/health >/dev/null 2>&1 \
-      && echo "OK: luma-api healthy on :8010" \
-      || echo "WARN: not healthy yet — check $LOG_DIR/luma-api.err.log" >&2
+    # Wait for it rather than a fixed sleep: on the Mac mini (10/13) the server took longer than
+    # the old 4 s and the install reported "not healthy" for a server that came up a moment later.
+    for _ in $(seq 1 30); do
+      curl -fsS -m 2 http://127.0.0.1:8010/v1/health >/dev/null 2>&1 && { echo "OK: luma-api healthy on :8010"; break; }
+      sleep 1
+    done
+    curl -fsS -m 2 http://127.0.0.1:8010/v1/health >/dev/null 2>&1 \
+      || echo "WARN: not healthy after 30 s — check $LOG_DIR/luma-api.err.log" >&2
     ;;
   luma-uninstall)
     launchctl bootout "$GUI/com.woolab.lumella.luma-api" 2>/dev/null || true
@@ -184,8 +191,34 @@ case "${1:-}" in
     launchctl print "$GUI/com.woolab.lumella.luma-tunnel" 2>/dev/null | grep -E "state|pid" || echo "not loaded"
     tail -n 5 "$LOG_DIR"/luma-tunnel.out.log 2>/dev/null || echo "no tunnel log yet"
     ;;
+  lan-install)
+    ALABEL="com.woolab.lumella.lan-address"
+    ATEMPLATE="$SCRIPT_DIR/$ALABEL.plist.template"
+    APLIST="$HOME/Library/LaunchAgents/$ALABEL.plist"
+    command -v vercel >/dev/null || { echo "ERROR: vercel CLI not found (needed to republish the address)" >&2; exit 1; }
+    mkdir -p "$LOG_DIR" "$(dirname "$APLIST")"
+    node_bin="$(command -v node)"
+    # /sbin and /usr/sbin: route(8) and ipconfig(8), which the script needs and launchd leaves out.
+    sed -e "s#__REPO_ROOT__#${REPO_ROOT}#g" \
+        -e "s#__PATH__#$(dirname "$node_bin"):$(dirname "$(command -v vercel)"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin#g" \
+        -e "s#__HOME__#${HOME}#g" \
+        -e "s#__LOG_DIR__#${LOG_DIR}#g" \
+        "$ATEMPLATE" > "$APLIST"
+    launchctl bootout "$GUI/$ALABEL" 2>/dev/null || true
+    launchctl bootstrap "$GUI" "$APLIST"
+    echo "installed $ALABEL — runs now and every 5 min; watch $LOG_DIR/lan-address.out.log"
+    ;;
+  lan-uninstall)
+    launchctl bootout "$GUI/com.woolab.lumella.lan-address" 2>/dev/null || true
+    rm -f "$HOME/Library/LaunchAgents/com.woolab.lumella.lan-address.plist"
+    echo "removed the lan-address agent"
+    ;;
+  lan-status)
+    launchctl print "$GUI/com.woolab.lumella.lan-address" 2>/dev/null | grep -E "state|last exit|runs" || echo "not loaded"
+    tail -n 3 "$LOG_DIR"/lan-address.out.log 2>/dev/null || echo "no lan-address log yet"
+    ;;
   *)
-    sed -n '12,18p' "$0"
+    sed -n '12,28p' "$0"
     exit 1
     ;;
 esac

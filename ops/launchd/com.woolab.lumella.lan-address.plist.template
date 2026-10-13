@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Mac-resident LaunchAgent that keeps the address the glasses read at boot answering.
+
+  Why: the glasses take the KLLA server's address from lumella-token's /v1/config. Only the tunnel
+  agent rewrote it, so with the tunnel down the endpoint kept serving a dead URL, and the APK's
+  baked-in LAN address goes stale whenever DHCP moves this Mac. ops/publish-lan-address.sh checks
+  the published address every five minutes and republishes only when it has stopped answering —
+  the live tunnel if it answers, else this Mac's current LAN address (both verified first).
+
+  It ran on the Mac mini for weeks as a hand-made plist; the 10/13 folder move found it outside
+  manage.sh, still pointing at the old folder. This template puts it with the other four.
+
+  TEMPLATE: ops/launchd/manage.sh lan-install renders __PLACEHOLDERS__. No secrets here — the
+  Vercel token is read from ~/.config/lumella/tunnel.env by the script itself.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.woolab.lumella.lan-address</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__REPO_ROOT__/ops/publish-lan-address.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO_ROOT__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__PATH__</string>
+    <key>HOME</key>
+    <string>__HOME__</string>
+  </dict>
+
+  <!-- A check, not a server: run at load, then every five minutes; never kept alive. -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>300</integer>
+  <key>KeepAlive</key>
+  <false/>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>__LOG_DIR__/lan-address.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG_DIR__/lan-address.err.log</string>
+</dict>
+</plist>

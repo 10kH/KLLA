@@ -6,7 +6,7 @@
 
 ## 1. 재부팅 후 자동 기동
 
-네 개의 LaunchAgent가 있다. 설치는 각각 한 번만 하면 된다.
+다섯 개의 LaunchAgent가 있다. 설치는 각각 한 번만 하면 된다.
 
 | 에이전트 | 역할 | 설치 | 재시작 |
 |---|---|---|---|
@@ -14,8 +14,9 @@
 | `com.woolab.lumella.luma-tunnel` | 공개 터널 + URL 재게시 | `manage.sh tunnel-install` | KeepAlive |
 | `com.woolab.lumella.token-service` | 로컬 토큰 발급 (:8788) | `manage.sh install` | KeepAlive |
 | `com.woolab.lumella.luma-backup` | 매일 04:30 백업 | `manage.sh backup-install` | 1회성 |
+| `com.woolab.lumella.lan-address` | 5분마다 안경이 받는 주소 점검·재게시 | `manage.sh lan-install` | 5분 간격 |
 
-상태: `manage.sh luma-status` / `tunnel-status` / `status`
+상태: `manage.sh luma-status` / `tunnel-status` / `status` / `lan-status`
 
 > ⚠️ **LaunchAgent는 사용자 로그인 후에 뜬다.** 이 맥은 자동 로그인이 꺼져 있는 것으로 보인다
 > (`/etc/kcpassword` 부재). 즉 **재부팅하면 로그인 전까지 luma·터널이 전부 죽어 있다.**

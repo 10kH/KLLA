@@ -196,21 +196,22 @@ RayNeo 하드웨어에서 실제로 겪은 함정 모음 — 네이티브 앱 �
 
 ## 재부팅 후 자동 기동 (launchd)
 
-세 서비스가 사용자 로그인 시 자동으로 뜬다. 수동 기동은 필요 없다.
+아래 서비스가 사용자 로그인 시 자동으로 뜬다. 수동 기동은 필요 없다(백업 포함 전체 목록: [`operations.md`](operations.md)).
 
 | 에이전트 | 역할 | 설치 |
 |---|---|---|
 | `com.woolab.lumella.luma-api` | 코치 엔진(:8010) | `ops/launchd/manage.sh luma-install` |
 | `com.woolab.lumella.luma-tunnel` | 공개 터널 + URL 재게시 | `ops/launchd/manage.sh tunnel-install` |
 | `com.woolab.lumella.token-service` | 로컬 토큰 발급(:8788) | `ops/launchd/manage.sh install` |
+| `com.woolab.lumella.lan-address` | 5분마다 안경이 받는 주소 점검·재게시 | `ops/launchd/manage.sh lan-install` |
 
-셋 다 `KeepAlive`라 죽으면 자동 재시작한다(실측: luma-api를 SIGKILL하면 ~20초 내 새 pid로 부활).
+위 세 개는 `KeepAlive`라 죽으면 자동 재시작한다(실측: luma-api를 SIGKILL하면 ~20초 내 새 pid로 부활).
 
 > **왜 luma-api까지 여기서 관리하나**: 터널만 살아있고 뒤에 아무것도 없으면 글래스는
 > 조용히 voice-only로 떨어지고, 원인을 가리키는 에러가 아무데도 안 남는다. 이 에이전트는
 > luma 저장소를 전혀 건드리지 않고 기동만 담당한다.
 
-상태 확인: `manage.sh luma-status` / `tunnel-status` / `status`
+상태 확인: `manage.sh luma-status` / `tunnel-status` / `status` / `lan-status`
 
 ## 프로젝트 문서 지도
 
