@@ -57,12 +57,13 @@ ops/launchd/manage.sh luma-install
 ## 3. 이 맥에만 있는 비밀·설정 (백업 대상)
 
 전부 gitignore돼 있어 저장소에는 없다. 맥이 죽으면 **다시 만들어야** 한다.
+폴더 이름은 2026-10-13 이후 기준(`~/workspace/KLLA`, `~/workspace/KLLA-server`; 맥미니 이전 절차는 [MACMINI-RENAME.md](MACMINI-RENAME.md)).
 
 | 파일 | 담고 있는 것 | 잃으면 |
 |---|---|---|
-| `luma/luma-api/.env` | OpenAI 키, ETRI 설정, 모델 선택 등 37줄 | ETRI 설정 재수집 필요 |
-| `glasses/token-service/.env.local` | OpenAI 키, `LUMELLA_LOCAL_TOKEN` | 토큰 서비스 공유 시크릿 재발급 → Vercel 환경변수도 함께 교체 |
-| `glasses/local.properties` | 토큰 서비스 주소, 공유 시크릿, 데모 계정 | 앱 재빌드 설정 |
+| `KLLA-server/luma-api/.env` | OpenAI 키, ETRI 설정, 모델 선택 등 37줄 | ETRI 설정 재수집 필요 |
+| `KLLA/token-service/.env.local` | OpenAI 키, `LUMELLA_LOCAL_TOKEN` | 토큰 서비스 공유 시크릿 재발급 → Vercel 환경변수도 함께 교체 |
+| `KLLA/local.properties` | 토큰 서비스 주소, 공유 시크릿, 데모 계정 | 앱 재빌드 설정 |
 | `ELLA/local.properties` | Vercel 엔드포인트, `REALTIME_TOKEN_SECRET` | ELLA 3개 엔드포인트 인증 재설정 |
 
 **API 키 자체는 제공자 대시보드에서 재발급 가능하지만, 우리가 생성한 공유 시크릿은 아니다.**
