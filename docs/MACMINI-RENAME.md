@@ -12,6 +12,9 @@
 > 3. `uv sync --reinstall`이 손으로 깔아 둔 패키지를 지웠다(luma-evolution, gepa, pytest, ruff 등). openai도 3.6.0 → lock의
 >    2.53.0. 서버는 luma_evolution을 import하지 않아 문제없다. luma-evolution은 자기 폴더의 pyproject로 따로 돌린다.
 >    pytest·ruff가 필요하면 `cd ~/workspace/KLLA-server/luma-api && uv sync --extra dev`.
+> 4. (10/14) `luma-install`을 다시 돌리자 `Bootstrap failed: 5: Input/output error`로 멈추고 서버가 꺼진 채 남았다. manage.sh가
+>    bootout 직후 바로 bootstrap을 불러서, 옛 프로세스가 아직 내려가는 중이면 실패했다. 이제 다섯 install 모두 완전히 내려갈
+>    때까지 기다린 뒤 올리고, 그래도 실패하면 3초 뒤 한 번 더 한다.
 >
 > **남은 한 번 (맥미니):** 손으로 고친 lan-address plist를 템플릿 것으로 바꾼다.
 > `cd ~/workspace/KLLA && git pull --ff-only && ops/launchd/manage.sh lan-install && ops/launchd/manage.sh lan-status`
@@ -21,7 +24,7 @@
 - **모든 명령을 터미널 창 하나에서 순서대로** 친다. 1단계에서 만든 변수(`OLD_GLASSES`, `OLD_SERVER`)를 끝까지 쓴다.
 - 중간에 "멈추세요"라고 적힌 결과가 나오면 거기서 멈추고 결과를 붙여서 알려 주면 된다.
 
-바꾸는 것: 맥미니의 두 폴더 이름, 그 폴더를 가리키는 git 주소와 LaunchAgent 4개, 서버 가상환경.
+바꾸는 것: 맥미니의 두 폴더 이름, 그 폴더를 가리키는 git 주소와 LaunchAgent 5개, 서버 가상환경.
 바꾸지 않는 것: 저장소 안의 `luma-api`·`luma-web` 폴더, 앱 ID `com.woolab.lumella`, LaunchAgent 이름(`com.woolab.lumella.*`),
 `~/.config/lumella/`, `~/Backups/luma/`, Vercel 쪽. 전부 학습자에게 안 보이는 이름이라 그대로 둔다
 ([BRAND.md](https://github.com/10kH/KLLA-server/blob/main/docs/BRAND.md) "저장소 안에 남은 옛 이름").
@@ -192,6 +195,9 @@ tail -30 ~/workspace/KLLA/tmp/token-service/luma-api.err.log
 - `No module named …`: 6단계를 다시 한다. 그래도 같으면 맥미니에 손으로 깔아 두었던 패키지가 `uv sync`로 지워진 것이다.
   `cd ~/workspace/KLLA-server/luma-api && uv pip install <그 패키지>` 후 `$M luma-install`, 그리고 알려 줄 것(의존성에 넣어야 함).
 - `address already in use`: `$M luma-install`을 한 번 더 (스크립트가 :8010을 비운다).
+
+**`Bootstrap failed: 5: Input/output error`가 나올 때** — 옛 manage.sh다(bootout이 끝나기 전에 bootstrap을 불렀다).
+그 서비스는 꺼진 상태다. `cd ~/workspace/KLLA && git pull --ff-only` 후 같은 `$M …-install`을 다시 한다.
 
 **터널 주소가 안 바뀔 때** — `$M tunnel-status`의 로그를 본다. Vercel 인증(`~/.config/lumella/tunnel.env`)은 이번 작업과 상관없다.
 

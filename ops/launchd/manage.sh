@@ -62,6 +62,28 @@ stop_port() {
   fi
 }
 
+# (Re)load one LaunchAgent. bootout returns before launchd has finished tearing the job down (the
+# process is still exiting: uvicorn drains, the tunnel stops cloudflared). A bootstrap that lands
+# in that window fails with "Bootstrap failed: 5: Input/output error", and under set -e the install
+# stops there with the agent unloaded — the server stayed down on the Mac mini (10/14), and the
+# same race reproduces on any Mac with a job that takes a few seconds to exit on SIGTERM.
+# So: wait until launchd no longer knows the label, then bootstrap; if it still fails, wait and
+# try once more, and say plainly that the agent is not running if that fails too.
+reload_agent() {
+  local label="$1" plist="$2" i
+  launchctl bootout "$GUI/$label" 2>/dev/null || true
+  for i in $(seq 1 60); do
+    launchctl print "$GUI/$label" >/dev/null 2>&1 || break
+    sleep 0.5
+  done
+  launchctl bootstrap "$GUI" "$plist" 2>/dev/null && return 0
+  echo "bootstrap of $label failed; retrying in 3 s" >&2
+  sleep 3
+  launchctl bootstrap "$GUI" "$plist" && return 0
+  echo "ERROR: $label is NOT loaded (not running). Retry: launchctl bootstrap $GUI $plist" >&2
+  exit 1
+}
+
 health() {
   sleep 2
   if curl -fsS -m 5 "http://$HOST:$PORT/healthz" >/dev/null 2>&1; then
@@ -80,8 +102,7 @@ case "${1:-}" in
     }
     render
     stop_port
-    launchctl bootout "$GUI/$LABEL" 2>/dev/null || true
-    launchctl bootstrap "$GUI" "$PLIST_DST"
+    reload_agent "$LABEL" "$PLIST_DST"
     launchctl kickstart -k "$GUI/$LABEL"
     health
     ;;
@@ -112,8 +133,7 @@ case "${1:-}" in
         -e "s#__HOME__#${HOME}#g" \
         -e "s#__LOG_DIR__#${LOG_DIR}#g" \
         "$BTEMPLATE" > "$BPLIST"
-    launchctl bootout "$GUI/$BLABEL" 2>/dev/null || true
-    launchctl bootstrap "$GUI" "$BPLIST"
+    reload_agent "$BLABEL" "$BPLIST"
     echo "installed $BLABEL — runs daily at 04:30; run now with: $0 backup-now"
     ;;
   backup-now)
@@ -143,8 +163,7 @@ case "${1:-}" in
     # Free the port: a hand-started uvicorn would keep launchd's copy crash-looping.
     pids="$(lsof -ti tcp:8010 -sTCP:LISTEN 2>/dev/null || true)"
     [ -n "$pids" ] && { echo "stopping existing luma-api on :8010 -> $pids"; kill $pids 2>/dev/null || true; sleep 2; }
-    launchctl bootout "$GUI/$LLABEL" 2>/dev/null || true
-    launchctl bootstrap "$GUI" "$LPLIST"
+    reload_agent "$LLABEL" "$LPLIST"
     # Wait for it rather than a fixed sleep: on the Mac mini (10/13) the server took longer than
     # the old 4 s and the install reported "not healthy" for a server that came up a moment later.
     for _ in $(seq 1 30); do
@@ -177,8 +196,7 @@ case "${1:-}" in
         -e "s#__HOME__#${HOME}#g" \
         -e "s#__LOG_DIR__#${LOG_DIR}#g" \
         "$TTEMPLATE" > "$TPLIST"
-    launchctl bootout "$GUI/$TLABEL" 2>/dev/null || true
-    launchctl bootstrap "$GUI" "$TPLIST"
+    reload_agent "$TLABEL" "$TPLIST"
     echo "installed $TLABEL — the tunnel URL is republished to Vercel on each start; watch $LOG_DIR/luma-tunnel.out.log"
     ;;
   tunnel-uninstall)
@@ -203,8 +221,7 @@ case "${1:-}" in
         -e "s#__HOME__#${HOME}#g" \
         -e "s#__LOG_DIR__#${LOG_DIR}#g" \
         "$ATEMPLATE" > "$APLIST"
-    launchctl bootout "$GUI/$ALABEL" 2>/dev/null || true
-    launchctl bootstrap "$GUI" "$APLIST"
+    reload_agent "$ALABEL" "$APLIST"
     echo "installed $ALABEL — runs now and every 5 min; watch $LOG_DIR/lan-address.out.log"
     ;;
   lan-uninstall)
