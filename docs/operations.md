@@ -53,6 +53,39 @@ ops/launchd/manage.sh luma-install
 검증 이력: 2026-07-29 스냅샷을 별도 경로에 풀어 `integrity=ok`, users/sessions/images가
 원본과 일치(332/392/37)함을 확인했다.
 
+### 서버 코드 반영 (KLLA-server main → 맥미니)
+
+```bash
+cd ~/workspace/KLLA-server && git pull --ff-only && git log --oneline -1
+cd ~/workspace/KLLA && ops/launchd/manage.sh luma-install    # 서버가 몇 초(실측 6.5초) 꺼진다
+```
+
+`OK: luma-api healthy on :8010`이 나오면 끝. pull한 커밋이 `luma-api/pyproject.toml`이나 `uv.lock`을 바꿨으면
+`luma-install` 전에 `cd ~/workspace/KLLA-server/luma-api && uv sync`.
+
+### 데모 계정 학습자 상태 초기화 (2026-10-14, 한 번만)
+
+안경이 쓰는 데모 계정(`learner@luma.app`)의 학습자 상태에 AI FESTA 부스에서 오간 말이 관심사·학습 초점으로
+쌓여 있었다(관심사 "Bye-bye.", 초점 "그래서 이것도 앱이 두 가지 버전이 있거든요…"). 주제 없는 턴의 발화를 통째로
+주제로 삼던 버그 때문이고, KLLA-server #22(`3b27de7`)에서 고쳤다. 이 값은 모든 개인화 프롬프트에 들어가서,
+ETRI 답을 OpenAI로 바꾸는 품질 판정과 gpt_qa 답을 흐렸다. 관심사 점수는 줄어들지 않으므로 한 번 지운다.
+지우면 다음 턴에 기본값(환경설정의 관심사)으로 다시 만들어진다. 학습 기록(대화·세션)은 건드리지 않는다.
+
+**반드시 위 "서버 코드 반영"으로 #22(`3b27de7`) 이후가 떠 있는 상태에서** 한다. 옛 서버가 떠 있으면 바로 다시 쌓인다.
+
+```bash
+cd ~/workspace/KLLA && ops/launchd/manage.sh backup-now          # integrity=ok 확인
+DB=~/workspace/KLLA-server/luma-api/data/luma.db
+Q="FROM learner_states WHERE user_id=(SELECT id FROM users WHERE email='learner@luma.app')"
+sqlite3 "$DB" "SELECT json_extract(current_focus,'$.topic') $Q;" # 지우기 전: 부스 문장이 보이면 맞다
+sqlite3 -cmd ".timeout 5000" "$DB" "DELETE $Q; SELECT changes();" # 1이 나와야 한다
+sqlite3 "$DB" "SELECT count(*) $Q;"                              # 0
+```
+
+되돌리기: 방금 만든 백업으로 `## 2`의 복원 절차.
+(맥북에서 시험한 것: 같은 스키마의 빈 DB에 데모 계정과 부스 문장을 넣고 위 세 줄을 돌려 `1`, `0`; 그 뒤 서버 코드가
+행을 기본값 `travel`·`daily life` / `continuation`으로 다시 만드는 것까지.)
+
 ---
 
 ## 3. 이 맥에만 있는 비밀·설정 (백업 대상)
