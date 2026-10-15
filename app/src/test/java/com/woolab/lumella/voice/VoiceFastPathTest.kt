@@ -51,7 +51,7 @@ class VoiceFastPathTest {
         brain = brain,
         transport = transport,
         sessionId = { "s1" },
-        personaSummary = "You are Luma.",
+        personaSummary = "You are KLLA.",
         topic = { topic },
     )
 
@@ -206,7 +206,7 @@ class VoiceFastPathTest {
             brain = brain,
             transport = transport,
             sessionId = { "s1" },
-            personaSummary = "You are Luma.",
+            personaSummary = "You are KLLA.",
             fetchSteeringTimeoutMs = 200L,
         )
 
