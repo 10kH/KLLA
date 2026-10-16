@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Speech bubble and sound waves are ELLA's shapes, unchanged; the letter is K. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M30,32 Q30,26 36,26 L72,26 Q78,26 78,32 L78,58 Q78,64 72,64 L50,64 L42,76 L42,64 L36,64 Q30,64 30,58 Z" />
+
+    <!-- K, in the same 44..64 x 34..56 box and stroke weight as ELLA's E; a darker teal than the
+         background so it holds up on the white bubble. -->
+    <path
+        android:fillColor="#1B98A8"
+        android:pathData="M44,34 L50,34 L50,42 L57,34 L64.5,34 L54.8,44.6 L65,56 L57.5,56 L50,48.2 L50,56 L44,56 Z" />
+
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.6"
+        android:pathData="M82,30 Q86,34 82,38"
+        android:strokeWidth="2"
+        android:strokeColor="#FFFFFF" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.4"
+        android:pathData="M86,26 Q92,34 86,42"
+        android:strokeWidth="2"
+        android:strokeColor="#FFFFFF" />
+</vector>
