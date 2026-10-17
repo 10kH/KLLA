@@ -169,6 +169,8 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
 
     /** Topic replies in two parts (split-reply launch flag), or null for the lagged guide. */
     private var splitReply: SplitReply? = null
+    /** The response now streaming is a split reply's second part (websocket reader thread). */
+    @Volatile private var responseIsSecondPart = false
     private val splitTimer = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "lumella-split-reply").apply { isDaemon = true }
     }
@@ -523,7 +525,9 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                         // pause after they stop talking. Also marks where the tutor's own
                         // voice starts, which is the window an echo loop would show up in.
                         val since = if (turnEndedAtMs > 0) System.currentTimeMillis() - turnEndedAtMs else -1
-                        Log.i(TAG, "튜터 발화 시작 (TTFA ${since}ms)")
+                        // A split reply's second part is not the pause after the learner stopped;
+                        // labelled apart so TTFA figures read from this log stay the first word's.
+                        Log.i(TAG, if (responseIsSecondPart) "튜터 발화 시작 (둘째 부분, 턴 끝에서 ${since}ms)" else "튜터 발화 시작 (TTFA ${since}ms)")
                         runOnUiThread { updateStatus("Speaking...", "#4CAF50") }
                     }
                     audioPlayback.playDelta(base64Pcm16)
@@ -621,6 +625,7 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                     // The second part of a split reply continues the first on screen: the first
                     // part's audio is usually still playing when the second part starts.
                     val secondPart = splitReply?.onResponseStarted() == true
+                    responseIsSecondPart = secondPart
                     responseSpoke = false
                     runawayGuard.onResponseStarted()
                     Log.d(TAG, "응답 경계: 억제 해제 + 리셋")
