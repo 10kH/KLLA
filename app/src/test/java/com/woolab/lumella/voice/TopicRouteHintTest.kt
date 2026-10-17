@@ -81,6 +81,32 @@ class TopicRouteHintTest {
         ).forEach { assertNull(it, hint(it)) }
     }
 
+    /** Questions and requests in statement form, which the recognizer writes without a mark (review of b4d40a8). */
+    @Test
+    fun formalQuestionsAndRequestsWithoutAMarkAreLeftToTheRouter() {
+        listOf(
+            "선생님도 매운 음식을 좋아합니까",
+            "이 문장이 맞습니까",
+            "그게 맞는 건가요",
+            "매운 거 좋아하죠",
+            "혹시 광장시장 가 봤어요",
+            "예문 하나 부탁해요",
+            "잘 못 알아들었어요",
+            "잘 안 들려요",
+            "떡볶이 만드는 법을 알고 싶어요",
+            "광장시장이 유명한지 궁금해요",
+            "쉬운 말로 해 주면 좋겠어요",
+            "한 번 더 말해 줄 수 있어요",
+            "이 문장 고쳐 주세요. 어제 시장에 갔어요.",
+            "잘 들어주세요. 오늘은 피곤해요",
+            "다음에 또 봐요",
+            "오늘 수고하셨습니다",
+        ).forEach { assertNull(it, hint(it)) }
+        // 가요 that goes somewhere, and the causal 니까, are still statements.
+        listOf("내일 또 시장에 가요", "친구는 안 가요", "맛있으니까 또 먹었어요. 맛있었으니까")
+            .forEach { assertEquals(it, TopicRouteHint.TOPIC_CHAT, hint(it)) }
+    }
+
     @Test
     fun becauseIsNotAQuestion() {
         assertEquals(TopicRouteHint.TOPIC_CHAT, hint("왜냐하면 떡볶이가 너무 매웠어요"))

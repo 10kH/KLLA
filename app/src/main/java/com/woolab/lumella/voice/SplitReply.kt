@@ -37,6 +37,7 @@ class SplitReply(
     private var coachAnswered = false
     private var line: String? = null
     private var firstDoneAtMs = 0L
+    private var closingTurn = 0
 
     /** Called before the first part's response.create goes out, so its response.created cannot outrun it. */
     @Synchronized
@@ -46,6 +47,7 @@ class SplitReply(
         phase = Phase.FIRST_REQUESTED
         coachAnswered = false
         line = null
+        if (closingTurn == turnId) drop(CLOSING)
     }
 
     /**
@@ -96,9 +98,16 @@ class SplitReply(
     @Synchronized
     fun onToolCall() = drop("첫 부분이 도구 호출")
 
-    /** The learner's sentence ends the conversation: the first part said goodbye; a question would undo it. */
+    /**
+     * The learner's sentence for [turnId] ends the conversation: the first part says goodbye; a
+     * question would undo it. Kept by turn: the transcript can land before the first part is asked
+     * for (that waits on the steering fetch), and a late one must not drop a later turn's question.
+     */
     @Synchronized
-    fun onLearnerClosing() = drop("학습자가 대화를 마무리")
+    fun onLearnerClosing(turnId: Int) {
+        closingTurn = turnId
+        if (turnId == this.turnId) drop(CLOSING)
+    }
 
     @Synchronized
     private fun onDeadline(turn: Int) {
@@ -122,5 +131,6 @@ class SplitReply(
     companion object {
         /** An unplayed figure beyond this is a wrong reading (a flushed track), not a long reply. */
         const val MAX_UNPLAYED_MS = 8_000L
+        private const val CLOSING = "학습자가 대화를 마무리"
     }
 }

@@ -13,7 +13,8 @@ class InputReplacement(
     sampleRateHz: Int,
     private val onDone: () -> Unit = {},
 ) {
-    private val total = pcm.size + (sampleRateHz.toLong() * 2 * trailingSilenceMs / 1000).toInt().let { it - it % 2 }
+    private val total = pcm.size +
+        (sampleRateHz.toLong() * 2 * trailingSilenceMs.coerceAtLeast(0) / 1000).toInt().let { it - it % 2 }
     private var pos = 0
     private var done = false
 
@@ -63,7 +64,9 @@ class InputReplacement(
                         return bytes.copyOfRange(body, end - (end - body) % 2)
                     }
                 }
-                at = (body + size + size % 2).toInt()
+                val next = body + size + size % 2
+                if (next > bytes.size) return null // a chunk running past the file: corrupt
+                at = next.toInt()
             }
             return null
         }

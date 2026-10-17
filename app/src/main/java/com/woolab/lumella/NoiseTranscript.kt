@@ -12,10 +12,11 @@ import com.woolab.lumella.voice.OpenAiRealtimeTransport
  * this keeps out is everything downstream of the transcript: the learner record (a fake turn is a
  * fake data point for the habit diagnosis), the coach, and the on-screen echo.
  *
- * Conservative on purpose: only a blank transcript or the prompt echoed back, in whole or in part,
- * the prompt's example sentence alone included: on the glasses 2026-10-17 a turn opened by room
- * sound came back as "어제 친구를 만나요." and went to the coach as the learner's. A short real
- * utterance ("네", "음") is a turn.
+ * Conservative on purpose: only a blank transcript or the prompt echoed back, in whole or in part.
+ * A short real utterance ("네", "음") is a turn. Known miss: room sound once came back as the
+ * prompt's example alone ("어제 친구를 만나요.", glasses 2026-10-17, 1 of 111 microphone turns in
+ * the day's logs). It is not filtered: a learner can say exactly that sentence, and the worked
+ * example stays in the prompt as the precaution against repaired slips (see TRANSCRIPTION_PROMPT).
  */
 object NoiseTranscript {
     private val promptMarkers: List<String> = listOf("들리는 대로", "받아쓰")
@@ -23,9 +24,7 @@ object NoiseTranscript {
     fun isNoise(transcript: String): Boolean {
         val t = transcript.trim()
         if (t.isEmpty()) return true
-        val bare = t.trimEnd('.', '!', '?', '…', ' ').trim('"', '“', '”')
         return promptMarkers.all { t.contains(it) } ||
-            (bare.length >= 12 && OpenAiRealtimeTransport.TRANSCRIPTION_PROMPT.contains(bare)) ||
-            bare == OpenAiRealtimeTransport.TRANSCRIPTION_PROMPT_EXAMPLE
+            (t.length >= 12 && OpenAiRealtimeTransport.TRANSCRIPTION_PROMPT.contains(t))
     }
 }

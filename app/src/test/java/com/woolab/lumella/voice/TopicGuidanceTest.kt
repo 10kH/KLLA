@@ -118,12 +118,25 @@ class TopicGuidanceTest {
             "오늘 대화 즐거웠어요",
             "안녕히 계세요",
             "이제 그만할게요",
+            "고마워요. 다음에 또 봐요!",
+            "그럼 우리 또 만나요",
+            "클라랑 얘기해서 즐거웠어요",
+            "오늘 수고하셨습니다",
         ).forEach { assertTrue(it, TopicGuidance.learnerIsClosing(it)) }
         listOf(
             "아, 고마워요!", // after the answer to a question (script v5)
             "고마워요! 제주도 또 가고 싶어요",
             "영화가 재미있었어요",
             "네, 마약 김밥이에요. 이름이 재밌어요.",
+            // A goodbye word inside a sentence, or 'thanks' inside a word (review of b4d40a8).
+            "주말에 친구를 또 만나요",
+            "그 카페에 자주 가요. 시간이 잘 가요",
+            "가족들은 다 잘 있어요",
+            "영화는 다음에 봐요",
+            "숙제를 빨리 끝낼게요",
+            "추수감사절 파티가 재미있었어요",
+            "오늘 친구랑 이야기를 많이 해서 즐거웠어요",
+            "안녕하세요! 지난 주말 얘기할게요",
         ).forEach { assertFalse(it, TopicGuidance.learnerIsClosing(it)) }
     }
 

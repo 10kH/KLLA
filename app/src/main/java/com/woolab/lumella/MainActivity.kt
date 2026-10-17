@@ -1413,7 +1413,9 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
         }
         currentTurnUserTranscript = text
         runOnUiThread { updateUserEcho(text) }
-        if (sessionTopic != null && TopicGuidance.learnerIsClosing(text)) splitReply?.onLearnerClosing()
+        if (sessionTopic != null && TopicGuidance.learnerIsClosing(text)) {
+            turnTracker.current().takeIf { it > 0 }?.let { splitReply?.onLearnerClosing(it) }
+        }
         submitCurrentTurnEvidence()
     }
 
@@ -1830,7 +1832,8 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                             // side effects of playback can be observed on demand.
                             // --ez guarded true: a 5 s tone as a reply would arrive, 100 ms deltas
                             // through onTutorAudio, so the runaway guard has to cut it (a steady
-                            // hum is exactly what it is for: 19:27 on 9/30).
+                            // hum is exactly what it is for: 19:27 on 9/30). Only with no turn in
+                            // flight: a reply starting during the tone would share its guard.
                             val guarded = intent.getBooleanExtra("guarded", false)
                             val seconds = if (guarded) 5 else 1
                             Log.i(TAG, "debug: playback tone triggered via broadcast (guarded=$guarded)")

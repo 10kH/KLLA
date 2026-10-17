@@ -132,9 +132,6 @@ class OpenAiRealtimeTransport(
                 "조사, 어미, 시제를 고치지 마세요. " +
                 "예: \"어제 친구를 만나요\"는 \"어제 친구를 만나요\" 그대로."
 
-        /** [TRANSCRIPTION_PROMPT]'s example sentence; on noise the transcriber can return it alone ([NoiseTranscript]). */
-        const val TRANSCRIPTION_PROMPT_EXAMPLE: String = "어제 친구를 만나요"
-
         /**
          * v1 product decision (Intent Reconciliation 2026-07-21): KOREAN tutoring.
          * English meta-instructions, Korean speech — realtime models follow this reliably.

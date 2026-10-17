@@ -148,25 +148,38 @@ object TopicGuidance {
     fun freshGuide(guide: String?, sourceTurnId: Int, currentTurnId: Int): String? =
         guide?.takeIf { it.isNotBlank() && currentTurnId - sourceTurnId in 1..MAX_GUIDE_AGE_TURNS }
 
+    /** Goodbyes, matched at the end of the last sentence with nothing but [FILLERS] before them. */
     private val GOODBYES = listOf(
-        "안녕히", "잘 가요", "잘 있어요", "다음에 봐요", "다음에 또 봐요", "또 만나요", "다음에 또 얘기해요",
-        "다음에 또 이야기해요", "그만할게요", "그만할래요", "그만 할게요", "그만 할래요", "끝낼게요", "끝낼래요",
-        "이만 갈게요", "수고하셨",
+        "안녕히 계세요", "안녕히 가세요", "안녕", "잘 가요", "잘 있어요", "다음에 봐요", "다음에 또 봐요",
+        "또 봐요", "또 만나요", "다음에 또 만나요", "다음에 또 얘기해요", "다음에 또 이야기해요", "그만할게요",
+        "그만할래요", "그만 할게요", "그만 할래요", "끝낼게요", "끝낼래요", "이만 갈게요", "수고하셨어요",
+        "수고하셨습니다",
     )
+    private val FILLERS = setOf("그럼", "우리", "네", "자", "아", "이제", "오늘", "오늘은", "저", "저는", "클라", "선생님", "정말")
+    /** "That was fun" about this talk: "오늘 이야기 재미있었어요", "얘기해서 즐거웠어요". */
+    private val TALK_WAS_FUN = Regex("(이야기|얘기|대화)(가|는|도|해서|해 줘서|나눠서)?\\s*(정말|너무|진짜|아주)?\\s*(재미있었|재밌었|즐거웠)")
     private val HAD_FUN = listOf("재미있었", "재밌었", "즐거웠")
-    private val THANKS = listOf("고마워", "고맙", "감사")
+    /** Thanks ending a sentence ("…추수감사절 파티" is not thanks). */
+    private val THANKS_ENDINGS = listOf("고마워요", "고마워", "고마웠어요", "고맙습니다", "감사해요", "감사했어요", "감사합니다")
+    private val SENTENCE_SPLIT = Regex("[.!?？…~]+")
 
     /**
-     * The learner is ending the conversation: a goodbye, or thanks together with "that was fun"
-     * ("오늘 이야기 재미있었어요. 고마워요!"). Thanks alone is not an ending: after an answer it
-     * thanks the answer ("아, 고마워요!"). The topic instruction tells the voice how to say goodbye;
-     * this lets a split reply skip its second part, which would otherwise ask one more question.
+     * The learner is ending the conversation: a goodbye closing what they said, "this talk was fun",
+     * or thanks together with "that was fun" ("오늘 이야기 재미있었어요. 고마워요!"). Thanks alone is
+     * not an ending: after an answer it thanks the answer ("아, 고마워요!"). A goodbye word inside a
+     * sentence is not one either ("주말에 친구를 또 만나요", "숙제를 빨리 끝낼게요"). The topic
+     * instruction tells the voice how to say goodbye; this lets a split reply skip its second part,
+     * which would otherwise ask one more question.
      */
     fun learnerIsClosing(transcript: String): Boolean {
-        val t = transcript.trim()
-        if (GOODBYES.any { it in t }) return true
-        val hadFun = HAD_FUN.any { it in t }
-        return hadFun && (THANKS.any { it in t } || ("오늘" in t && listOf("이야기", "얘기", "대화").any { it in t }))
+        val sentences = transcript.split(SENTENCE_SPLIT).map { it.replace(',', ' ').trim() }.filter { it.isNotEmpty() }
+        val last = sentences.lastOrNull() ?: return false
+        val saysGoodbye = GOODBYES.any { g ->
+            last.endsWith(g) && last.removeSuffix(g).split(' ').filter { it.isNotEmpty() }.all { it in FILLERS }
+        }
+        if (saysGoodbye) return true
+        if (sentences.any { TALK_WAS_FUN.containsMatchIn(it) }) return true
+        return sentences.any { s -> HAD_FUN.any { it in s } } && sentences.any { s -> THANKS_ENDINGS.any { s.endsWith(it) } }
     }
 }
 

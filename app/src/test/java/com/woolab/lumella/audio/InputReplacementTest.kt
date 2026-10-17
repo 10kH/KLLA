@@ -42,6 +42,15 @@ class InputReplacementTest {
     }
 
     @Test
+    fun aChunkSizeRunningPastTheFileIsRefusedNotLoopedOn() {
+        // A size of 0xFFFFFFF8 once wrapped the read position back onto the same chunk (review of b4d40a8).
+        val bad = wav(ByteArray(480), padding = true)
+        val fllr = (0 until bad.size - 4).first { String(bad, it, 4, Charsets.US_ASCII) == "FLLR" }
+        le32(-8).copyInto(bad, fllr + 4)
+        assertNull(InputReplacement.wavPcm(bad, 24_000))
+    }
+
+    @Test
     fun theRecordingGoesOutReadForReadThenSilenceThenTheMicrophoneAgain() {
         var done = 0
         // 100 ms of sound at 24 kHz (4,800 bytes), then 50 ms (2,400 bytes) of silence.

@@ -90,12 +90,35 @@ class SplitReplyTest {
         // The transcript lands while the first part (the goodbye) is still being generated.
         split.onFirstPartRequested(30)
         split.onResponseStarted()
-        split.onLearnerClosing()
+        split.onLearnerClosing(30)
         split.onResponseDone()
         split.onCoachAnswered(30, "다음에는 어디 가고 싶어요?")
         scheduled.forEach { it.second() }
 
         assertTrue(sent.isEmpty())
+    }
+
+    @Test
+    fun aGoodbyeHeardBeforeTheFirstPartIsAskedForStillHasNoSecondPart() {
+        // The voice queue asks for the first part only after the steering fetch (up to 1.5 s);
+        // the transcript can be first.
+        split.onLearnerClosing(30)
+        firstPartOut(30)
+        split.onCoachAnswered(30, "다음에는 어디 가고 싶어요?")
+        scheduled.forEach { it.second() }
+
+        assertTrue(sent.isEmpty())
+    }
+
+    @Test
+    fun aLateGoodbyeForAnEarlierTurnDoesNotDropTheNextTurnsQuestion() {
+        split.onFirstPartRequested(31)
+        split.onResponseStarted()
+        split.onLearnerClosing(30)
+        split.onResponseDone()
+        split.onCoachAnswered(31, "어떤 케이크가 좋아요?")
+
+        assertEquals(listOf(31 to "어떤 케이크가 좋아요?"), sent)
     }
 
     @Test
