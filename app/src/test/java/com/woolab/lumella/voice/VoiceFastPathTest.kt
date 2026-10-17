@@ -115,7 +115,7 @@ class VoiceFastPathTest {
         voice.onTurnStart(currentTurnId = 4)
 
         val first = transport.sent.single()
-        assertTrue(first.endsWith(TopicGuidance.SPLIT_FIRST))
+        assertTrue(first.endsWith(TopicGuidance.SPLIT_FIRST + "\n" + VoiceFastPath.POLITENESS_LAST))
         assertTrue("the topic still applies", first.contains("어제 친구와 한 일을 말해요"))
         assertFalse("the previous sentence's line would pull the reply backwards", first.contains("turn 3 줄"))
         assertEquals(null, voice.lastAppliedTopicGuide)
@@ -126,9 +126,12 @@ class VoiceFastPathTest {
 
         val second = transport.sent[1]
         assertTrue(second.contains(TopicGuidance.guideInstruction("어떤 커피 마셨나요?")))
-        assertTrue(second.endsWith(TopicGuidance.SPLIT_SECOND))
+        assertTrue(second.endsWith(TopicGuidance.SPLIT_SECOND + "\n" + VoiceFastPath.POLITENESS_LAST))
         assertFalse(second.contains(TopicGuidance.SPLIT_FIRST))
-        assertTrue("same persona and topic as the first part", second.startsWith(first.removeSuffix(TopicGuidance.SPLIT_FIRST).trimEnd()))
+        assertTrue(
+            "same persona and topic as the first part",
+            second.startsWith(first.removeSuffix(TopicGuidance.SPLIT_FIRST + "\n" + VoiceFastPath.POLITENESS_LAST).trimEnd()),
+        )
         assertEquals(Triple(4, 4, "어떤 커피 마셨나요?"), voice.lastAppliedTopicGuide)
         assertEquals(2, transport.sent.size)
     }
@@ -147,8 +150,29 @@ class VoiceFastPathTest {
         assertTrue(voice.sendSecondPart(5, null))
         assertFalse("once per turn", voice.sendSecondPart(5, null))
         assertEquals(3, transport.sent.size)
-        assertTrue(transport.sent[2].endsWith(TopicGuidance.SPLIT_SECOND))
+        assertTrue(transport.sent[2].contains(TopicGuidance.SPLIT_SECOND))
         assertFalse(transport.sent[2].contains("proposed this next line"))
+    }
+
+    @Test
+    fun everyResponseEndsWithThePolitenessRuleOnceInEveryMode() {
+        val lagged = RecordingTransport()
+        fastPath(guideFrom(3, "어떤 커피 마셨나요?"), lagged, topic = "주제").onTurnStart(currentTurnId = 4)
+        val open = RecordingTransport()
+        fastPath(guideFrom(3, "x"), open, topic = null).onTurnStart(currentTurnId = 4)
+        val splitSent = RecordingTransport()
+        val wiring = SplitWiring()
+        val voice = fastPath(guideFrom(3, "x"), splitSent, topic = "주제", splitReply = wiring.split)
+        wiring.voice = voice
+        voice.onTurnStart(currentTurnId = 4)
+        voice.sendSecondPart(4, "어떤 커피 마셨나요?")
+
+        val all = lagged.sent + open.sent + splitSent.sent
+        assertEquals(4, all.size)
+        all.forEach { sent ->
+            assertTrue(sent.endsWith("\n" + VoiceFastPath.POLITENESS_LAST))
+            assertEquals("once", 2, sent.split(VoiceFastPath.POLITENESS_LAST).size)
+        }
     }
 
     @Test

@@ -12,8 +12,9 @@ package com.woolab.lumella.voice
  * and its audio queues behind the first part's on the speaker. When the coach answers with no line
  * (an off-topic question went to GPT) or has not answered by the time the first part has been heard
  * plus [extraWaitMs], the second part goes without a line: the voice's own question back to the
- * topic. When the learner starts talking, or the first part turned into a tool call, there is no
- * second part.
+ * topic. When the learner starts talking, the first part turned into a tool call, or the learner is
+ * ending the conversation ([TopicGuidance.learnerIsClosing]: the first part was the goodbye), there is
+ * no second part.
  *
  * State only; the caller wires the events and does the sending. Thread-safe: the events arrive on
  * the websocket reader, the coach executor and the voice queue.
@@ -94,6 +95,10 @@ class SplitReply(
     /** The first part became a tool call; the tool's own continuation carries the turn. */
     @Synchronized
     fun onToolCall() = drop("첫 부분이 도구 호출")
+
+    /** The learner's sentence ends the conversation: the first part said goodbye; a question would undo it. */
+    @Synchronized
+    fun onLearnerClosing() = drop("학습자가 대화를 마무리")
 
     @Synchronized
     private fun onDeadline(turn: Int) {

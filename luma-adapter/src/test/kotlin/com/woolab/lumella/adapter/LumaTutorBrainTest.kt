@@ -173,9 +173,30 @@ class LumaTutorBrainTest {
 
         val sent = transport.recorded.last { it.method == "POST" && it.url.endsWith("/v1/orchestrator/turn") }.body.orEmpty()
         assertTrue(sent.contains("\"topicHint\":\"어제 친구와 한 일을 말해요\""), sent)
+        assertFalse(sent.contains("routeHint"), "no hint, no field: the router decides")
         val steering = brain.fetchSteering("sess-1") as SteeringResult.Available
         assertEquals("친구가 커피를 사줬군요! 어떤 커피를 마셨어요?", steering.evidence.topicGuide)
         assertEquals(3, steering.evidence.sourceTurnId)
+        brain.stopHeartbeat()
+    }
+
+    @Test
+    fun `a route hint is sent as routeHint`() {
+        val transport = FakeLumaHttpTransport().apply {
+            wireHappyPath(coach = true)
+            on("POST", "/v1/orchestrator/turn", json(
+                """{"session":{"id":"sess-1"},"selectedRoute":"topic_chat","selectedProvider":"etri","assistantText":""}"""
+            ))
+        }
+        val brain = newBrain(transport)
+        brain.connect(FakeCredentialsProvider())
+        brain.startSession(SessionPolicy.RESUME_ACTIVE)
+
+        brain.submitTurnEvidence(TurnEvidence(turnId = 3, learnerTranscript = "친구가 커피가 샀어요",
+            topicHint = "어제 친구와 한 일을 말해요", routeHint = "topic_chat"))
+
+        val sent = transport.recorded.last { it.method == "POST" && it.url.endsWith("/v1/orchestrator/turn") }.body.orEmpty()
+        assertTrue(sent.contains("\"routeHint\":\"topic_chat\""), sent)
         brain.stopHeartbeat()
     }
 

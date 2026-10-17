@@ -45,23 +45,40 @@ object TopicGuidance {
             "learner asks about something else, ANSWER IT first in one short, useful sentence — never refuse, " +
             "postpone or wave it away — and then bring the talk back to the topic with one question. Your recast " +
             "or expansion of the learner's sentence still comes first — the topic question never replaces it — " +
-            "and the whole reply stays 1-2 short sentences."
+            "and the whole reply stays 1-2 short sentences. Every question asks something new: never ask again what you " +
+            "already asked or what the learner already told you. When the learner is ending the conversation (they thank you, " +
+            "say it was fun, say goodbye), ask nothing more: say goodbye warmly in one or two sentences in 해요체, naming " +
+            "one thing they told you today (\"저도 즐거웠어요! … 다음에 또 이야기해요.\", never \"나도\" or \"안녕!\")."
 
     fun guideInstruction(guide: String): String =
         "The topic tutor (ETRI Tango) proposed this next line for the topic: \"$guide\". After your recast or " +
             "expansion, " +
             "take the conversation in that direction — use its question, in your own short words and in the " +
             "learner's politeness level. Do not read it out word for word. If the learner has just asked about " +
-            "something else, answer that first; use this direction only to come back to the topic."
+            "something else, answer that first; use this direction only to come back to the topic. If its question " +
+            "asks what the learner already told you, ask something new in that direction instead."
 
     /**
      * The first part of a split reply ([SplitReply]): the recast or the answer, no question. A learner
      * question still gets its answer here; the way back to the topic is the second part's job.
+     *
+     * Check first, expand only a right sentence: measured 2026-10-17 with aaai27
+     * split_reply_probe.py, script v6, six runs per version, on the 9 recast lines. Without these rules
+     * 40/54; an expansion rule alone ("how it looked, tasted or felt") fixed the plain line (0/6 ->
+     * 6/6) but the model then expanded slips too and kept them (맵었 3/6 -> 0/6); checking first gave
+     * 45/54. Still missed: "시장에 떡볶이를 먹었어요" is taken as right and expanded (1/6), and a
+     * stricter 에/에서 rule did not change that (1/6, 44/54 in all).
      */
     const val SPLIT_FIRST =
         "RIGHT NOW say ONLY the first part of your reply, one short sentence and no question: your recast or " +
             "expansion of the learner's last sentence or, if the learner asked you something, a short answer to it. " +
-            "A second part follows separately."
+            "First check their sentence for a mistake: a particle (이/가 where 을/를 belongs, or 에 where the place " +
+            "of an action needs 에서: \"도서관에 공부했어요\" -> \"도서관에서 공부했군요!\") or a verb form " +
+            "(\"덥었어요\" -> \"더웠군요!\"). If there is one, your recast says their WHOLE sentence back with it fixed, " +
+            "never repeated, and adds nothing. Only if there is none, say it back with one richer word about the " +
+            "thing itself — how it looked, tasted or felt, not just 정말, 꽤 or 너무 (\"사과 샀어요\" -> " +
+            "\"빨갛고 큰 사과를 샀군요!\"). If they asked for a better word, give one or two. If they are ending the " +
+            "conversation, say your goodbye here. A second part follows separately."
 
     /** The second part of a split reply: one question, in the topic tutor's direction when its line came back. */
     const val SPLIT_SECOND =
@@ -130,6 +147,27 @@ object TopicGuidance {
     /** The guide to use at [currentTurnId], or null when there is none or it is stale. */
     fun freshGuide(guide: String?, sourceTurnId: Int, currentTurnId: Int): String? =
         guide?.takeIf { it.isNotBlank() && currentTurnId - sourceTurnId in 1..MAX_GUIDE_AGE_TURNS }
+
+    private val GOODBYES = listOf(
+        "안녕히", "잘 가요", "잘 있어요", "다음에 봐요", "다음에 또 봐요", "또 만나요", "다음에 또 얘기해요",
+        "다음에 또 이야기해요", "그만할게요", "그만할래요", "그만 할게요", "그만 할래요", "끝낼게요", "끝낼래요",
+        "이만 갈게요", "수고하셨",
+    )
+    private val HAD_FUN = listOf("재미있었", "재밌었", "즐거웠")
+    private val THANKS = listOf("고마워", "고맙", "감사")
+
+    /**
+     * The learner is ending the conversation: a goodbye, or thanks together with "that was fun"
+     * ("오늘 이야기 재미있었어요. 고마워요!"). Thanks alone is not an ending: after an answer it
+     * thanks the answer ("아, 고마워요!"). The topic instruction tells the voice how to say goodbye;
+     * this lets a split reply skip its second part, which would otherwise ask one more question.
+     */
+    fun learnerIsClosing(transcript: String): Boolean {
+        val t = transcript.trim()
+        if (GOODBYES.any { it in t }) return true
+        val hadFun = HAD_FUN.any { it in t }
+        return hadFun && (THANKS.any { it in t } || ("오늘" in t && listOf("이야기", "얘기", "대화").any { it in t }))
+    }
 }
 
 /**

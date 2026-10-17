@@ -17,6 +17,7 @@ import com.ffalcon.mercury.android.sdk.ui.activity.BaseMirrorActivity
 import com.woolab.tutor.slowpath.EndpointPedagogyAgentClient
 import com.woolab.lumella.audio.AudioCapture
 import com.woolab.lumella.audio.AudioPlayback
+import com.woolab.lumella.audio.InputReplacement
 import com.woolab.tutor.capture.TakeClock
 import com.woolab.tutor.capture.WavTap
 import com.woolab.lumella.brain.BrainFactory
@@ -45,6 +46,7 @@ import com.woolab.lumella.voice.RunawayReplyGuard
 import com.woolab.lumella.voice.SplitReply
 import com.woolab.lumella.voice.TopicGuidance
 import com.woolab.lumella.voice.TopicMemory
+import com.woolab.lumella.voice.TopicRouteHint
 import com.woolab.lumella.voice.VoiceFastPath
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -90,7 +92,7 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
         private const val DEBUG_CAPTURE_ACTION = "com.woolab.lumella.DEBUG_CAPTURE_PHOTO"
         /** Debug-only broadcast that toggles a speech turn without a touchpad tap. */
         private const val DEBUG_SPEECH_ACTION = "com.woolab.lumella.DEBUG_TOGGLE_SPEECH"
-        /** Debug-only broadcast that plays a 1s tone to exercise the speaker path. */
+        /** Debug-only broadcast: a 1s tone on the speaker path, or with guarded=true a 5s one through the runaway guard. */
         private const val DEBUG_PLAYBACK_ACTION = "com.woolab.lumella.DEBUG_PLAYBACK"
         /** Fills the subtitles with sample text so the layout can be checked with no wearer. */
         private const val DEBUG_SUBTITLE_ACTION = "com.woolab.lumella.DEBUG_SUBTITLE"
@@ -102,6 +104,12 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
         private const val DEBUG_REC_START_ACTION = "com.woolab.lumella.DEBUG_REC_START"
         private const val DEBUG_REC_STOP_ACTION = "com.woolab.lumella.DEBUG_REC_STOP"
         private const val DEBUG_OPENER_ACTION = "com.woolab.lumella.DEBUG_OPENER"
+        /** Plays a recorded WAV into the realtime input in place of the microphone (InputReplacement). */
+        private const val DEBUG_HEAR_ACTION = "com.woolab.lumella.DEBUG_HEAR"
+        /** AudioCapture's rate, which the realtime input requires. */
+        private const val MIC_SAMPLE_RATE_HZ = 24_000
+        /** After a DEBUG_HEAR recording: more than the server VAD's 700 ms, so the turn ends as speech does. */
+        private const val HEAR_TRAILING_SILENCE_MS = 1_500
         private const val HOLD_OPENER_FILE = "hold-opener"
         /** Present (ops/launch-lumella.sh --split): topic replies in two parts, see [SplitReply]. */
         private const val SPLIT_REPLY_FILE = "split-reply"
@@ -504,34 +512,7 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                     }
                 }
 
-                override fun onAudioDelta(base64Pcm16: String) {
-                    if (runawayGuard.isCut()) return
-                    val pcm = runCatching { java.util.Base64.getDecoder().decode(base64Pcm16) }.getOrNull()
-                    pcm?.let { runawayGuard.onPcm(it) }?.let { why ->
-                        // Sound that is not speech, or far past any reply: stop it now. The
-                        // wearer hears silence instead of a hum, the model stops generating.
-                        Log.w(TAG, "튜터 응답 끊음 ($why): 말이 아닌 소리이거나 너무 김 — 재생 중지, 응답 취소")
-                        audioPlayback.flush()
-                        transport.cancelActiveResponse()
-                        audioPlayback.endResponseStats()?.let { Log.i(TAG, "$it closedBy=runawayGuard") }
-                        speaking = false
-                        runOnUiThread { updateStatus(listeningLabel(), "#FF5722") }
-                        return
-                    }
-                    responseSpoke = true
-                    if (!speaking) {
-                        speaking = true
-                        // Time to first audio: what the wearer actually experiences as the
-                        // pause after they stop talking. Also marks where the tutor's own
-                        // voice starts, which is the window an echo loop would show up in.
-                        val since = if (turnEndedAtMs > 0) System.currentTimeMillis() - turnEndedAtMs else -1
-                        // A split reply's second part is not the pause after the learner stopped;
-                        // labelled apart so TTFA figures read from this log stay the first word's.
-                        Log.i(TAG, if (responseIsSecondPart) "튜터 발화 시작 (둘째 부분, 턴 끝에서 ${since}ms)" else "튜터 발화 시작 (TTFA ${since}ms)")
-                        runOnUiThread { updateStatus("Speaking...", "#4CAF50") }
-                    }
-                    audioPlayback.playDelta(base64Pcm16)
-                }
+                override fun onAudioDelta(base64Pcm16: String) = onTutorAudio(base64Pcm16)
 
                 override fun onAudioDone() {
                     // Marks the end of the tutor's own voice. Any VAD trigger between this
@@ -706,6 +687,7 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                     addAction(DEBUG_REC_START_ACTION)
                     addAction(DEBUG_REC_STOP_ACTION)
                     addAction(DEBUG_OPENER_ACTION)
+                    addAction(DEBUG_HEAR_ACTION)
                 },
                 // Only a sender holding DUMP may reach these. The receiver has to stay
                 // exported — `adb shell am broadcast` is the whole point of it, and the glasses
@@ -1119,8 +1101,41 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
         }
     }
 
-    /** Cuts a reply that turned into non-speech sound (19:27 on 9/30). Websocket reader thread only. */
+    /**
+     * Cuts a reply that turned into non-speech sound (19:27 on 9/30). Websocket reader thread only,
+     * except DEBUG_PLAYBACK's guarded tone, which runs only while no reply is playing.
+     */
     private val runawayGuard = RunawayReplyGuard(sampleRateHz = TUTOR_SAMPLE_RATE_HZ)
+
+    /** One delta of the tutor's voice: the runaway guard, the TTFA line, then the speaker. */
+    private fun onTutorAudio(base64Pcm16: String) {
+        if (runawayGuard.isCut()) return
+        val pcm = runCatching { java.util.Base64.getDecoder().decode(base64Pcm16) }.getOrNull()
+        pcm?.let { runawayGuard.onPcm(it) }?.let { why ->
+            // Sound that is not speech, or far past any reply: stop it now. The
+            // wearer hears silence instead of a hum, the model stops generating.
+            Log.w(TAG, "튜터 응답 끊음 ($why): 말이 아닌 소리이거나 너무 김 — 재생 중지, 응답 취소")
+            audioPlayback.flush()
+            transport.cancelActiveResponse()
+            audioPlayback.endResponseStats()?.let { Log.i(TAG, "$it closedBy=runawayGuard") }
+            speaking = false
+            runOnUiThread { updateStatus(listeningLabel(), "#FF5722") }
+            return
+        }
+        responseSpoke = true
+        if (!speaking) {
+            speaking = true
+            // Time to first audio: what the wearer actually experiences as the
+            // pause after they stop talking. Also marks where the tutor's own
+            // voice starts, which is the window an echo loop would show up in.
+            val since = if (turnEndedAtMs > 0) System.currentTimeMillis() - turnEndedAtMs else -1
+            // A split reply's second part is not the pause after the learner stopped;
+            // labelled apart so TTFA figures read from this log stay the first word's.
+            Log.i(TAG, if (responseIsSecondPart) "튜터 발화 시작 (둘째 부분, 턴 끝에서 ${since}ms)" else "튜터 발화 시작 (TTFA ${since}ms)")
+            runOnUiThread { updateStatus("Speaking...", "#4CAF50") }
+        }
+        audioPlayback.playDelta(base64Pcm16)
+    }
 
     /** The response in progress has produced tutor audio (set per response). */
     @Volatile private var responseSpoke = false
@@ -1398,6 +1413,7 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
         }
         currentTurnUserTranscript = text
         runOnUiThread { updateUserEcho(text) }
+        if (sessionTopic != null && TopicGuidance.learnerIsClosing(text)) splitReply?.onLearnerClosing()
         submitCurrentTurnEvidence()
     }
 
@@ -1405,6 +1421,7 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
         val turnId = turnTracker.current().takeIf { it > 0 } ?: return
         val evidence = turnEvidenceAssembler.assemble(turnId = turnId, transcript = currentTurnUserTranscript)
             .copy(topicHint = sessionTopic)
+            .let { it.copy(routeHint = TopicRouteHint.of(it.learnerTranscript, it.topicHint, it.imageId)) }
         // The slow path does not wait for the brain. Measured 2026-09-26: a live coach turn on
         // /v1/orchestrator/turn takes ~5s, and the first version of this method ran it
         // synchronously ahead of the dispatcher, so every grammar record and the diagnosis
@@ -1419,7 +1436,15 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                 val started = System.currentTimeMillis()
                 val indicator = try {
                     voiceFastPath.submitTurnEvidence(evidence)
-                    brain.coachIndicator()
+                    // A hinted turn was routed by the app, not by the router: say so instead of
+                    // showing the router's rule code and a 100% it never computed.
+                    brain.coachIndicator()?.let {
+                        if (evidence.routeHint != null && it.route == evidence.routeHint) {
+                            it.copy(reason = TopicRouteHint.REASON, confidencePercent = null)
+                        } else {
+                            it
+                        }
+                    }
                 } catch (e: Exception) {
                     Log.w(TAG, "brain.submitTurnEvidence failed at turn $turnId: ${e.message}")
                     null
@@ -1429,6 +1454,7 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                 // next turn began is not drawn (it would describe the wrong turn), and the film
                 // is captioned from this line instead of from memory.
                 Log.i(TAG, "코치 turn $turnId: ${indicator?.let { "${it.attemptedProvider?.let { a -> "$a→" } ?: ""}${it.provider}/${it.route}" } ?: "no answer"} in ${took}ms" +
+                    (evidence.routeHint?.let { " (앱 판단 $it)" } ?: "") +
                     if (turnId != turnTracker.current()) " (next turn already began; not drawn)" else "")
                 // The topic tutor's own next line, for the edit: the film shows it next to the
                 // voice's reply that took its direction ('주제 유도 적용 turn N ← 코치 turn M').
@@ -1802,8 +1828,13 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                         DEBUG_PLAYBACK_ACTION -> {
                             // Exercises the speaker path without a live turn, so the media-stack
                             // side effects of playback can be observed on demand.
-                            Log.i(TAG, "debug: playback tone triggered via broadcast")
-                            val samples = ShortArray(24_000) { i ->
+                            // --ez guarded true: a 5 s tone as a reply would arrive, 100 ms deltas
+                            // through onTutorAudio, so the runaway guard has to cut it (a steady
+                            // hum is exactly what it is for: 19:27 on 9/30).
+                            val guarded = intent.getBooleanExtra("guarded", false)
+                            val seconds = if (guarded) 5 else 1
+                            Log.i(TAG, "debug: playback tone triggered via broadcast (guarded=$guarded)")
+                            val samples = ShortArray(24_000 * seconds) { i ->
                                 (Math.sin(2.0 * Math.PI * 440.0 * i / 24_000.0) * 6000).toInt().toShort()
                             }
                             val pcm = ByteArray(samples.size * 2)
@@ -1811,9 +1842,59 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                                 pcm[i * 2] = (samples[i].toInt() and 0xFF).toByte()
                                 pcm[i * 2 + 1] = ((samples[i].toInt() shr 8) and 0xFF).toByte()
                             }
-                            audioPlayback.playDelta(android.util.Base64.encodeToString(pcm, android.util.Base64.NO_WRAP))
-                            // Not a reply: close its accounting so the next real one starts clean.
-                            audioPlayback.endResponseStats()?.let { Log.i(TAG, "$it closedBy=tone") }
+                            if (!guarded) {
+                                audioPlayback.playDelta(android.util.Base64.encodeToString(pcm, android.util.Base64.NO_WRAP))
+                                // Not a reply: close its accounting so the next real one starts clean.
+                                audioPlayback.endResponseStats()?.let { Log.i(TAG, "$it closedBy=tone") }
+                            } else if (speaking) {
+                                Log.w(TAG, "debug: guarded tone refused — a reply is playing")
+                            } else {
+                                Thread({
+                                    // Not a turn: TTFA logs as -1 instead of timing from an old turn end.
+                                    turnEndedAtMs = 0L
+                                    runawayGuard.onResponseStarted()
+                                    val step = 2_400 * 2
+                                    var at = 0
+                                    while (at < pcm.size && !runawayGuard.isCut()) {
+                                        onTutorAudio(java.util.Base64.getEncoder().encodeToString(pcm.copyOfRange(at, minOf(pcm.size, at + step))))
+                                        at += step
+                                        Thread.sleep(100)
+                                    }
+                                    Log.i(TAG, "debug: guarded tone ended at ${at * 1000L / (24_000 * 2)}ms cut=${runawayGuard.isCut()}")
+                                    if (!runawayGuard.isCut()) {
+                                        audioPlayback.endResponseStats()?.let { Log.i(TAG, "$it closedBy=tone") }
+                                        speaking = false
+                                    }
+                                }, "lumella-debug-tone").apply { isDaemon = true }.start()
+                            }
+                        }
+                        DEBUG_HEAR_ACTION -> {
+                            // A recorded voice in place of the microphone (InputReplacement): the
+                            // server VAD, the transcription, TTFA, the coach turn and the echo gate all
+                            // see it as the wearer speaking, so real speech can be replayed without one.
+                            //   adb push hear.wav /sdcard/Android/data/com.woolab.lumella/files/
+                            //   adb shell am broadcast -p com.woolab.lumella -a com.woolab.lumella.DEBUG_HEAR --es name hear.wav
+                            val name = intent.getStringExtra("name")?.takeIf { it.isNotBlank() && '/' !in it } ?: run {
+                                Log.w(TAG, "debug: 들려주기 — name 없음")
+                                return
+                            }
+                            val file = java.io.File(getExternalFilesDir(null), name)
+                            val pcm = runCatching { file.readBytes() }.getOrNull()
+                                ?.let { InputReplacement.wavPcm(it, MIC_SAMPLE_RATE_HZ) }
+                            if (pcm == null) {
+                                Log.w(TAG, "debug: 들려주기 — $name 없음 또는 24kHz 16-bit mono WAV 아님")
+                                return
+                            }
+                            if (!audioCapture.isRecording) {
+                                Log.w(TAG, "debug: 들려주기 — 마이크가 꺼져 있음 (세션 준비 전)")
+                                return
+                            }
+                            val silenceMs = intent.getIntExtra("silence_ms", HEAR_TRAILING_SILENCE_MS)
+                            val input = InputReplacement(pcm, silenceMs, MIC_SAMPLE_RATE_HZ) {
+                                Log.i(TAG, "debug: 들려주기 끝 $name")
+                            }
+                            Log.i(TAG, "debug: 들려주기 시작 $name (${input.durationMs}ms + 무음 ${silenceMs}ms)")
+                            audioCapture.replaceInput(input)
                         }
                     }
                 }

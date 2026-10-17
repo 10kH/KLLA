@@ -95,11 +95,10 @@ class VoiceFastPath(
         if (split != null) {
             splitTurn = currentTurnId to base
             split.onFirstPartRequested(currentTurnId)
-            transport.sendInstructions(base + "\n" + TopicGuidance.SPLIT_FIRST)
+            transport.sendInstructions(compose(base, TopicGuidance.SPLIT_FIRST))
         } else {
             splitTurn = null
-            transport.sendInstructions(listOfNotNull(base, guide?.let { TopicGuidance.guideInstruction(it) })
-                .filter { it.isNotBlank() }.joinToString("\n"))
+            transport.sendInstructions(compose(base, guide?.let { TopicGuidance.guideInstruction(it) }))
         }
         orchestrator.commitDelivery(instructions)
         return instructions
@@ -115,10 +114,13 @@ class VoiceFastPath(
         if (turn != turnId) return false
         splitTurn = null
         lastAppliedTopicGuide = line?.let { Triple(turnId, turnId, it) }
-        transport.sendInstructions(listOfNotNull(base, line?.let { TopicGuidance.guideInstruction(it) }, TopicGuidance.SPLIT_SECOND)
-            .joinToString("\n"))
+        transport.sendInstructions(compose(base, line?.let { TopicGuidance.guideInstruction(it) }, TopicGuidance.SPLIT_SECOND))
         return true
     }
+
+    /** One response's instructions: the parts in order, then [POLITENESS_LAST]. */
+    private fun compose(vararg parts: String?): String =
+        (parts.toList() + POLITENESS_LAST).filterNot { it.isNullOrBlank() }.joinToString("\n")
 
     /** Fire-and-forget submission of this turn's evidence to the brain's slow path. */
     fun submitTurnEvidence(evidence: TurnEvidence) {
@@ -169,5 +171,23 @@ class VoiceFastPath(
         evidence.focusHint?.let { sb.append(it).append('\n') }
         evidence.hints.forEach { sb.append(it).append('\n') }
         return sb.toString().trim()
+    }
+
+    companion object {
+        /**
+         * Ends every response's instructions: the last thing the model reads before it speaks. The
+         * persona opens with the same rule, but a rule a few thousand characters back loses to the
+         * short exclamatory recast the model likes ("만났구나!"): on the glasses 2026-10-17 (script v6,
+         * learner always in -요) 17 of 30 split replies and 4 of 30 lagged ones had a 반말 sentence,
+         * nearly all of them the recast, and two called the learner 너 (aaai27 reply_checks.py). With this
+         * line (aaai27 split_reply_probe.py, script v6, six runs): split replies with a 반말 ending 51 of
+         * 180 -> 0 of 180, with 나/너 6 -> 0; lagged (two runs) 1 -> 0. Before the 저/제 clause the
+         * goodbye still said "나도 즐거웠어요" in 3 of 4.
+         */
+        const val POLITENESS_LAST =
+            "POLITENESS: if the learner's last sentence ended in -요, EVERY sentence you say ends in -요 or " +
+                "-습니다, your recast included (\"공원에서 책을 읽었군요!\", never \"읽었구나!\" or \"읽었네!\"), " +
+                "you say 저/제 for yourself, never 나/내 (\"저도 즐거웠어요\"), and you never call them 너. Only if they spoke 반말 " +
+                "do you speak 반말."
     }
 }

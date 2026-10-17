@@ -177,6 +177,8 @@ class LumaTutorBrain(
         // A topic-guided session: luma's classifier sees the topic and serves on-topic turns on
         // topic_chat (ETRI Tango, prompted with the topic); off-topic turns still go elsewhere.
         evidence.topicHint?.takeIf { it.isNotBlank() }?.let { fields["topicHint"] = jsonStr(it) }
+        // An explicit route: luma serves it without its model route selection (FR5 fast path).
+        evidence.routeHint?.takeIf { it.isNotBlank() }?.let { fields["routeHint"] = jsonStr(it) }
 
         try {
             val response = postJson("/v1/orchestrator/turn", LumaJson.Obj(fields))

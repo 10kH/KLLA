@@ -107,4 +107,30 @@ class TopicGuidanceTest {
         assertTrue("only when the learner chooses", p.contains("Never call it for a passing mention"))
         assertTrue("changing the subject without naming one: ask", p.contains("다른 얘기 하고 싶어요"))
     }
+
+    // --- how a conversation ends ---
+
+    @Test
+    fun aGoodbyeOrThanksForAFunTalkEndsTheConversationButThanksForAnAnswerDoesNot() {
+        listOf(
+            "오늘 이야기 재미있었어요. 고마워요!", // script v6 line 30
+            "그렇죠. 오늘 이야기 재미있었어요. 고마워요.", // the learner, lt8
+            "오늘 대화 즐거웠어요",
+            "안녕히 계세요",
+            "이제 그만할게요",
+        ).forEach { assertTrue(it, TopicGuidance.learnerIsClosing(it)) }
+        listOf(
+            "아, 고마워요!", // after the answer to a question (script v5)
+            "고마워요! 제주도 또 가고 싶어요",
+            "영화가 재미있었어요",
+            "네, 마약 김밥이에요. 이름이 재밌어요.",
+        ).forEach { assertFalse(it, TopicGuidance.learnerIsClosing(it)) }
+    }
+
+    @Test
+    fun theTopicInstructionSaysHowToSayGoodbye() {
+        val t = TopicGuidance.topicInstruction("지난 주말")
+        assertTrue(t.contains("ending the conversation"))
+        assertTrue(t.contains("ask nothing more"))
+    }
 }

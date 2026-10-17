@@ -86,6 +86,19 @@ class SplitReplyTest {
     }
 
     @Test
+    fun aGoodbyeHasNoSecondPartEvenWhenTangosLineComes() {
+        // The transcript lands while the first part (the goodbye) is still being generated.
+        split.onFirstPartRequested(30)
+        split.onResponseStarted()
+        split.onLearnerClosing()
+        split.onResponseDone()
+        split.onCoachAnswered(30, "다음에는 어디 가고 싶어요?")
+        scheduled.forEach { it.second() }
+
+        assertTrue(sent.isEmpty())
+    }
+
+    @Test
     fun anOlderResponsesDoneBeforeTheFirstPartStartsIsNotTheFirstPart() {
         // Publishing turn 5 cancels turn 4's reply; that reply's response.done arrives after the
         // first part was requested and must not count as the first part being out.

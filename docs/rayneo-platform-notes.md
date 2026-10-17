@@ -160,7 +160,7 @@ adb logcat -d -s lumella:V | grep -iE "lifecycle|cameraState|capture"
 ```
 `lifecycle=RESUMED`와 `cameraState=OPEN`이 보이면 정상 경로다.
 
-## 3-1. 착용·마이크 없이 검증하는 법 (디버그 브로드캐스트 3종 + `model-saw.jpg`)
+## 3-1. 착용·마이크 없이 검증하는 법 (디버그 브로드캐스트 + `model-saw.jpg`)
 
 `adb shell screencap`이 이 기기에서 검은 화면만 준다는 것(`ops/screen-dump.sh` 헤더 참고)과
 안경을 쓰지 않으면 마이크가 0.00ms 오디오를 반환한다는 것(§5)을 합치면, 착용도 발화도 못 하는
@@ -180,7 +180,20 @@ adb shell am broadcast -a com.woolab.lumella.DEBUG_SEE --es path scene.jpg --es 
 
 # 착용자 없이 자막 레이아웃만 확인한다 (샘플 텍스트로 채움)
 adb shell am broadcast -a com.woolab.lumella.DEBUG_SUBTITLE
+
+# 녹음한 목소리를 마이크 자리에 흘려 넣는다 (24kHz mono 16-bit WAV, 실시간 속도, 끝에 무음 1.5초).
+# 서버 VAD·전사·TTFA·코치 턴이 말한 턴과 똑같이 돈다. 그동안 실제 마이크 소리는 버린다.
+adb push hear.wav /storage/emulated/0/Android/data/com.woolab.lumella/files/
+adb shell am broadcast -a com.woolab.lumella.DEBUG_HEAR --es name hear.wav [--ei silence_ms 1500]
+
+# RunawayReplyGuard 점검: 5초 440Hz 음을 답 오디오처럼 100ms씩 흘려 넣는다. 로그에
+# "튜터 응답 끊음 (STEADY_SOUND)"과 "guarded tone ended at … cut=true"가 나오면 정상.
+adb shell am broadcast -a com.woolab.lumella.DEBUG_PLAYBACK --ez guarded true
 ```
+
+`DEBUG_HEAR`용 발화 파일은 끝을 넉넉히 남겨 자른다. 문장 끝 `요`는 조용해서, -45 dBFS에서
+자른 파일은 21개 중 6개가 "갔어요"를 "갔어"로 들렸다(2026-10-17). aaai27
+`artifacts/demo-scenario/hear_cut.py`가 그 끝을 살려 자른다.
 
 **안쪽 따옴표는 필수다.** `am`은 인자를 공백 기준으로 쪼개므로, `--es text` 값 안에 공백이
 있으면 `'...'`로 한 번 더 감싸지 않으면 첫 단어만 전달된다.

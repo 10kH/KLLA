@@ -37,6 +37,8 @@ data class TurnEvidence(
     val assistantTranscript: String? = null,
     val imageId: String? = null,
     val topicHint: String? = null,
+    /** A route the client already knows this turn takes (e.g. "topic_chat"); the brain skips its own route choice. */
+    val routeHint: String? = null,
 )
 
 /**

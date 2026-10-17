@@ -38,6 +38,11 @@ class AudioCapture(
      */
     @Volatile var tap: WavTap? = null
 
+    private val replacement = java.util.concurrent.atomic.AtomicReference<InputReplacement?>(null)
+
+    /** Debug: sends [input] in place of the microphone until it ends (see [InputReplacement]). */
+    fun replaceInput(input: InputReplacement) = replacement.set(input)
+
     /** Starts capture. Caller MUST already hold RECORD_AUDIO permission; fails closed otherwise. */
     fun start() {
         if (recording.get()) return
@@ -147,7 +152,8 @@ class AudioCapture(
             }
             when {
                 read > 0 -> {
-                    val pcm = buffer.copyOf(read)
+                    val pcm = replacement.get()?.let { r -> r.next(read) ?: run { replacement.compareAndSet(r, null); null } }
+                        ?: buffer.copyOf(read)
                     tap?.write(pcm)
                     onChunk(Base64.getEncoder().encodeToString(pcm))
                 }
