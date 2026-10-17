@@ -39,6 +39,9 @@ import com.woolab.tutor.slowpath.SlowPathTask
 import com.woolab.lumella.slowpath.TurnEvidenceAssembler
 import com.woolab.tutor.slowpath.TurnTracker
 import com.woolab.tutor.slowpath.LearnerStateStore
+import com.woolab.lumella.voice.FirstPartGate
+import com.woolab.lumella.voice.LearnerSlip
+import com.woolab.lumella.voice.LearnerSlips
 import com.woolab.lumella.voice.OkHttpRealtimeWebSocketFactory
 import com.woolab.lumella.voice.OpenAiRealtimeTransport
 import com.woolab.lumella.voice.RealtimeConnectionStatus
@@ -115,6 +118,8 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
         private const val SPLIT_REPLY_FILE = "split-reply"
         /** Split reply: silence the learner may hear after the first part while Tango is still out. */
         private const val SPLIT_EXTRA_WAIT_MS = 1_000L
+        /** Split reply: the longest a first part is held for its slip check ([FirstPartGate]). */
+        private const val FIRST_PART_MAX_HOLD_MS = 2_500L
         /** Two taps, each allowed 2s to drain ([WavTap.close]). */
         private const val TAP_CLOSE_WAIT_MS = 4_500L
         /** This app's own tutoring language, per `switch_tutor_language`'s own-language check. */
@@ -179,6 +184,8 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
     private var splitReply: SplitReply? = null
     /** The response now streaming is a split reply's second part (websocket reader thread). */
     @Volatile private var responseIsSecondPart = false
+    /** With [splitReply]: holds a first part until the learner's transcript has checked it for their slips. */
+    private var firstPartGate: FirstPartGate? = null
     private val splitTimer = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "lumella-split-reply").apply { isDaemon = true }
     }
@@ -386,6 +393,14 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
         } else {
             null
         }
+        firstPartGate = splitReply?.let {
+            FirstPartGate(
+                maxHoldMs = FIRST_PART_MAX_HOLD_MS,
+                schedule = { ms, action -> splitTimer.schedule(action, ms, TimeUnit.MILLISECONDS) },
+                redo = { turnId, slips -> redoFirstPart(turnId, slips) },
+                log = { Log.i(TAG, it) },
+            )
+        }
         Log.i(TAG, if (splitReply != null) "나눠 답하기: 켬 (Tango 줄을 같은 턴에)" else "나눠 답하기: 끔 (Tango 줄은 다음 턴에)")
 
         // BaseMirrorActivity inflates ActivityMainBinding per-eye into mBindingPair — no
@@ -483,6 +498,8 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                         // delivers — and it gates the "nothing heard yet" message, so a
                         // stuck true makes silent taps silent again for the rest of the run.
                         speaking = false
+                        // A first part held, dropped or being redone dies with the session.
+                        firstPartGate?.onConnectionLost()
                     }
                     if (status == RealtimeConnectionStatus.READY) {
                         // Hands-free: the microphone stays open for the whole session, so a
@@ -512,23 +529,21 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                     }
                 }
 
-                override fun onAudioDelta(base64Pcm16: String) = onTutorAudio(base64Pcm16)
+                override fun onAudioDelta(base64Pcm16: String) {
+                    // A first part held for its slip check plays when released (FirstPartGate).
+                    if (firstPartGate?.keepAudio { onTutorAudio(base64Pcm16) } != true) onTutorAudio(base64Pcm16)
+                }
 
                 override fun onAudioDone() {
-                    // Marks the end of the tutor's own voice. Any VAD trigger between this
-                    // and the start of speaking is the microphone hearing the tutor, which
-                    // is the failure hands-free lives or dies on.
-                    Log.i(TAG, "튜터 발화 끝")
-                    audioPlayback.endResponseStats()?.let { Log.i(TAG, it) }
-                    // What the subtitle says for this reply, to hold against what was heard
-                    // (wearer 2026-09-29: the subtitle had a closing question the audio did not).
-                    runOnUiThread { Log.i(TAG, "튜터 자막: $subtitleAccumulator") }
-                    audioPlayback.checkDrainedAfter(DRAIN_CHECK_MS) { Log.i(TAG, it) }
-                    speaking = false
-                    runOnUiThread { updateStatus("Ready") }
+                    if (firstPartGate?.keepDone({ onTutorAudioDone() }, responseDone = false) != true) onTutorAudioDone()
                 }
 
                 override fun onToolCall(name: String, callId: String, arguments: String) {
+                    if (firstPartGate?.onToolCall() == true) {
+                        // A first part being redone: its call leaves the conversation with it.
+                        Log.i(TAG, "첫 부분 확인: 버리는 첫 부분의 도구 호출 안 함 ($name)")
+                        return
+                    }
                     splitReply?.onToolCall()
                     // Display/language tools are routed BEFORE capturePolicy.decide: that
                     // policy only knows capture_photo and would Refuse anything else, which
@@ -566,6 +581,7 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                 override fun onSpeechStarted() {
                     Log.i(TAG, "음성 감지됨 (VAD)")
                     splitReply?.onLearnerSpeech()
+                    firstPartGate?.onLearnerSpeech { transport.dropRedo() }
                     handleSpeechStarted()
                 }
 
@@ -598,14 +614,19 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                 }
 
                 override fun onResponseDone() {
-                    settleTopicContinuation()
-                    splitReply?.onResponseDone()
+                    val done: () -> Unit = {
+                        settleTopicContinuation()
+                        splitReply?.onResponseDone()
+                    }
+                    // A held first part's done waits with it; a redone one's never comes through.
+                    if (firstPartGate?.keepDone(done, responseDone = true) != true) done()
                 }
 
                 override fun onResponseStarted() {
                     // The second part of a split reply continues the first on screen: the first
                     // part's audio is usually still playing when the second part starts.
                     val secondPart = splitReply?.onResponseStarted() == true
+                    firstPartGate?.onResponseStarted(splitReply?.speakingFirstPartOf())
                     responseIsSecondPart = secondPart
                     responseSpoke = false
                     runawayGuard.onResponseStarted()
@@ -628,6 +649,10 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                 }
 
                 override fun onTranscriptDelta(text: String) {
+                    if (firstPartGate?.onText(text) { showTutorDelta(text) } != true) showTutorDelta(text)
+                }
+
+                private fun showTutorDelta(text: String) {
                     runOnUiThread {
                         if (tutorDeltasSuppressed) {
                             // Logged once per suppressed response would be ideal; per-delta
@@ -637,6 +662,11 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                         subtitleAccumulator.append(text)
                         updateSubtitle(subtitleAccumulator.toString())
                     }
+                }
+
+                override fun onRedoRejected() {
+                    Log.w(TAG, "첫 부분 확인: 서버가 다시 요청을 거절함")
+                    firstPartGate?.onRedoFailed { turn -> splitReply?.onFirstPartRedoFailed(turn) }
                 }
 
                 override fun onError(message: String) {
@@ -1103,7 +1133,9 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
 
     /**
      * Cuts a reply that turned into non-speech sound (19:27 on 9/30). Websocket reader thread only,
-     * except DEBUG_PLAYBACK's guarded tone, which runs only while no reply is playing.
+     * except DEBUG_PLAYBACK's guarded tone, which runs only while no reply is playing, and a held
+     * first part [FirstPartGate] releases at its time limit, replayed on the split-reply timer under
+     * the gate's lock.
      */
     private val runawayGuard = RunawayReplyGuard(sampleRateHz = TUTOR_SAMPLE_RATE_HZ)
 
@@ -1135,6 +1167,44 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
             runOnUiThread { updateStatus("Speaking...", "#4CAF50") }
         }
         audioPlayback.playDelta(base64Pcm16)
+    }
+
+    /** output_audio.done: the end of the tutor's own voice for this response. */
+    private fun onTutorAudioDone() {
+        // Marks the end of the tutor's own voice. Any VAD trigger between this
+        // and the start of speaking is the microphone hearing the tutor, which
+        // is the failure hands-free lives or dies on.
+        Log.i(TAG, "튜터 발화 끝")
+        audioPlayback.endResponseStats()?.let { Log.i(TAG, it) }
+        // What the subtitle says for this reply, to hold against what was heard
+        // (wearer 2026-09-29: the subtitle had a closing question the audio did not).
+        runOnUiThread { Log.i(TAG, "튜터 자막: $subtitleAccumulator") }
+        audioPlayback.checkDrainedAfter(DRAIN_CHECK_MS) { Log.i(TAG, it) }
+        speaking = false
+        runOnUiThread { updateStatus("Ready") }
+    }
+
+    /**
+     * [FirstPartGate] dropped split turn [turnId]'s first part unheard (it said the learner's slip
+     * back, or did not say it right): ask for it again with [slips] named. Runs under the gate's lock,
+     * so the learner starting to talk is ordered before or after it (lock order: gate, SplitReply,
+     * transport). A refusal by the server comes back later as [OpenAiRealtimeTransport.Listener.onRedoRejected].
+     */
+    private fun redoFirstPart(turnId: Int, slips: List<LearnerSlip>) {
+        val instructions = voiceFastPath.firstPartRedo(turnId, slips)
+        if (instructions == null) {
+            Log.i(TAG, "첫 부분 확인 turn $turnId: 다음 턴이 시작돼 다시 요청 안 함")
+            return
+        }
+        // Before the request: its response.created must find the split reply waiting for a first part.
+        splitReply?.onFirstPartRedone(turnId)
+        if (!transport.redoResponse(instructions)) {
+            Log.w(TAG, "첫 부분 확인 turn $turnId: 다시 요청 실패 (응답 없음)")
+            firstPartGate?.onRedoFailed { turn -> splitReply?.onFirstPartRedoFailed(turn) }
+            return
+        }
+        // The draft's words shown before the hold (often the slip itself) go now, not at the redo's start.
+        runOnUiThread { clearSubtitle() }
     }
 
     /** The response in progress has produced tutor audio (set per response). */
@@ -1415,6 +1485,15 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
         runOnUiThread { updateUserEcho(text) }
         if (sessionTopic != null && TopicGuidance.learnerIsClosing(text)) {
             turnTracker.current().takeIf { it > 0 }?.let { splitReply?.onLearnerClosing(it) }
+        }
+        // A split reply's first part is checked against the slips a rule can see (FirstPartGate):
+        // named in it when it has not gone out yet, held and checked when it has.
+        val gate = firstPartGate
+        val turn = turnTracker.current()
+        if (gate != null && sessionTopic != null && turn > 0) {
+            val slips = LearnerSlips.find(text)
+            if (slips.isNotEmpty() && !voiceFastPath.noteSlips(turn, slips)) gate.onTranscript(turn, slips)
+            else if (slips.isNotEmpty()) Log.i(TAG, "첫 부분 확인 turn $turn: 실수 ${slips.joinToString { "${it.said}->${it.fixed}" }} — 첫 부분에 미리 알림")
         }
         submitCurrentTurnEvidence()
     }

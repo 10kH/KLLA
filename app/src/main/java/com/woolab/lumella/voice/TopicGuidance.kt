@@ -67,7 +67,12 @@ object TopicGuidance {
      * 40/54; an expansion rule alone ("how it looked, tasted or felt") fixed the plain line (0/6 ->
      * 6/6) but the model then expanded slips too and kept them (맵었 3/6 -> 0/6); checking first gave
      * 45/54. Still missed: "시장에 떡볶이를 먹었어요" is taken as right and expanded (1/6), and a
-     * stricter 에/에서 rule did not change that (1/6, 44/54 in all).
+     * stricter 에/에서 rule did not change that (1/6, 44/54 in all); [FirstPartGate] checks those.
+     *
+     * Asked for a better word than "달고 부드러웠어요" (script v6 line 23), the first part put the
+     * English loan "크리미했어요" (18) or the same "부드러웠어요" (6) where their word was, in 24 of 48
+     * runs over eight versions. Asking here for "NEW Korean words they did not use, not English
+     * loanwords" did not help (1/6, aaai27 recast-1017-gate2-split-*.json), so it is not in.
      */
     const val SPLIT_FIRST =
         "RIGHT NOW say ONLY the first part of your reply, one short sentence and no question: your recast or " +
@@ -79,6 +84,22 @@ object TopicGuidance {
             "thing itself — how it looked, tasted or felt, not just 정말, 꽤 or 너무 (\"사과 샀어요\" -> " +
             "\"빨갛고 큰 사과를 샀군요!\"). If they asked for a better word, give one or two. If they are ending the " +
             "conversation, say your goodbye here. A second part follows separately."
+
+    /**
+     * The slips [LearnerSlips] found in the learner's sentence, before [SPLIT_FIRST]: in the first part
+     * when the transcript was in before it was asked for, and in the redo [FirstPartGate] asks for when
+     * the first part said a slip back. {slips} is one [SLIP_ITEM] per slip, joined with "; ".
+     */
+    const val SLIP_NOTE =
+        "THEIR SENTENCE HAS A SLIP, already checked: {slips}. Your recast says their WHOLE sentence back with " +
+            "it fixed, never their words as they said them."
+
+    const val SLIP_ITEM = "\"{said}\" should be \"{fixed}\" ({why})"
+
+    fun slipNote(slips: List<LearnerSlip>): String = SLIP_NOTE.replace(
+        "{slips}",
+        slips.joinToString("; ") { SLIP_ITEM.replace("{said}", it.said).replace("{fixed}", it.fixed).replace("{why}", it.why) },
+    )
 
     /** The second part of a split reply: one question, in the topic tutor's direction when its line came back. */
     const val SPLIT_SECOND =

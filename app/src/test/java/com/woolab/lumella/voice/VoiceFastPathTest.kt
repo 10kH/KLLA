@@ -154,6 +154,60 @@ class VoiceFastPathTest {
         assertFalse(transport.sent[2].contains("proposed this next line"))
     }
 
+    // --- the learner's slips and the split first part (FirstPartGate) ---
+
+    @Test
+    fun slipsKnownBeforeTheFirstPartGoesOutAreNamedInIt() {
+        val transport = RecordingTransport()
+        val wiring = SplitWiring()
+        val voice = fastPath(guideFrom(3, "x"), transport, topic = "주제", splitReply = wiring.split)
+        wiring.voice = voice
+        val slips = LearnerSlips.find("시장에 떡볶이를 먹었어요")
+
+        assertTrue("not sent yet: the first part will carry them", voice.noteSlips(4, slips))
+        voice.onTurnStart(currentTurnId = 4)
+
+        val first = transport.sent.single()
+        assertTrue(first.endsWith(TopicGuidance.slipNote(slips) + "\n" + TopicGuidance.SPLIT_FIRST + "\n" + VoiceFastPath.POLITENESS_LAST))
+        assertFalse("sent: the gate has to check it", voice.noteSlips(4, slips))
+    }
+
+    @Test
+    fun slipsForAnotherTurnAreNotNamedInThisOne() {
+        val transport = RecordingTransport()
+        val wiring = SplitWiring()
+        val voice = fastPath(guideFrom(3, "x"), transport, topic = "주제", splitReply = wiring.split)
+        wiring.voice = voice
+
+        voice.noteSlips(3, LearnerSlips.find("시장에 떡볶이를 먹었어요"))
+        voice.onTurnStart(currentTurnId = 4)
+
+        assertFalse(transport.sent.single().contains("SLIP"))
+        assertFalse("an older turn's first part has gone out too", voice.noteSlips(3, LearnerSlips.find("시장에 떡볶이를 먹었어요")))
+    }
+
+    @Test
+    fun theRedoIsTheSameFirstPartWithTheSlipsNamedAndOnlyForTheCurrentTurn() {
+        val transport = RecordingTransport()
+        val wiring = SplitWiring()
+        val voice = fastPath(guideFrom(3, "x"), transport, topic = "주제", splitReply = wiring.split)
+        wiring.voice = voice
+        val slips = LearnerSlips.find("떡볶이가 너무 맵었어요")
+        voice.onTurnStart(currentTurnId = 4)
+        val first = transport.sent.single()
+
+        val redo = voice.firstPartRedo(4, slips)
+
+        assertEquals(
+            first.removeSuffix(TopicGuidance.SPLIT_FIRST + "\n" + VoiceFastPath.POLITENESS_LAST) +
+                TopicGuidance.slipNote(slips) + "\n" + TopicGuidance.SPLIT_FIRST + "\n" + VoiceFastPath.POLITENESS_LAST,
+            redo,
+        )
+        assertEquals(null, voice.firstPartRedo(3, slips))
+        voice.onTurnStart(currentTurnId = 5)
+        assertEquals("a later turn has started", null, voice.firstPartRedo(4, slips))
+    }
+
     @Test
     fun everyResponseEndsWithThePolitenessRuleOnceInEveryMode() {
         val lagged = RecordingTransport()

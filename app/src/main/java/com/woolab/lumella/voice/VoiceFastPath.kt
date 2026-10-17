@@ -51,6 +51,15 @@ class VoiceFastPath(
     @Volatile
     private var splitTurn: Pair<Int, String>? = null
 
+    /**
+     * Guards "which turn's first part has gone out" against the learner's slips arriving: either the
+     * first part carries them, or [noteSlips] says it went out without them (then [FirstPartGate]
+     * checks it). The transcript can land before the first part is sent: that waits on the steering fetch.
+     */
+    private val firstPartLock = Any()
+    private var firstPartSentFor = 0
+    private var slipsBeforeFirstPart: Pair<Int, List<LearnerSlip>>? = null
+
     /** The topic tutor's line applied at the last turn start: (turn, source turn, line); for the log. */
     @Volatile
     var lastAppliedTopicGuide: Triple<Int, Int, String>? = null
@@ -95,7 +104,12 @@ class VoiceFastPath(
         if (split != null) {
             splitTurn = currentTurnId to base
             split.onFirstPartRequested(currentTurnId)
-            transport.sendInstructions(compose(base, TopicGuidance.SPLIT_FIRST))
+            synchronized(firstPartLock) {
+                firstPartSentFor = currentTurnId
+                val slips = slipsBeforeFirstPart?.takeIf { it.first == currentTurnId }?.second
+                slipsBeforeFirstPart = null
+                transport.sendInstructions(compose(base, slips?.let { TopicGuidance.slipNote(it) }, TopicGuidance.SPLIT_FIRST))
+            }
         } else {
             splitTurn = null
             transport.sendInstructions(compose(base, guide?.let { TopicGuidance.guideInstruction(it) }))
@@ -116,6 +130,23 @@ class VoiceFastPath(
         lastAppliedTopicGuide = line?.let { Triple(turnId, turnId, it) }
         transport.sendInstructions(compose(base, line?.let { TopicGuidance.guideInstruction(it) }, TopicGuidance.SPLIT_SECOND))
         return true
+    }
+
+    /**
+     * The learner's [slips] for split turn [turnId]. True when its first part has not gone out yet and
+     * will name them; false when it went out without them (the caller has [FirstPartGate] check it).
+     */
+    fun noteSlips(turnId: Int, slips: List<LearnerSlip>): Boolean = synchronized(firstPartLock) {
+        if (firstPartSentFor >= turnId) return false
+        slipsBeforeFirstPart = turnId to slips
+        true
+    }
+
+    /** The instructions to ask for split turn [turnId]'s first part again with [slips] named; null once a later turn started. */
+    fun firstPartRedo(turnId: Int, slips: List<LearnerSlip>): String? {
+        val (turn, base) = splitTurn ?: return null
+        if (turn != turnId) return null
+        return compose(base, TopicGuidance.slipNote(slips), TopicGuidance.SPLIT_FIRST)
     }
 
     /** One response's instructions: the parts in order, then [POLITENESS_LAST]. */

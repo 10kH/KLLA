@@ -2325,4 +2325,230 @@ class OpenAiRealtimeTransportTest {
         assertTrue("prompt must carry a worked example", prompt.contains("어제 친구를 만나요"))
         assertFalse("prompt must not advertise conversation practice", prompt.contains("회화 연습"))
     }
+
+    // --- redoResponse: a first part the learner never heard, asked for again (FirstPartGate) ---
+
+    private fun startedWithItems(factory: FakeFactory, responseId: String, vararg items: String) {
+        factory.lastListener?.onMessage("""{"type":"response.created","response":{"id":"$responseId"}}""")
+        items.forEach {
+            factory.lastListener?.onMessage(
+                """{"type":"response.output_item.added","response_id":"$responseId","output_index":0,"item":{"id":"$it","type":"message"}}""",
+            )
+        }
+    }
+
+    private fun type(json: String) = MiniJson.string(MiniJson.asObject(MiniJson.parse(json)), "type")
+
+    @Test
+    fun redoOfAResponseStillGeneratingCancelsItThenDeletesItsWordsAndAsksAgainAtItsDone() {
+        val factory = FakeFactory()
+        val transport = OpenAiRealtimeTransport(successProvider(), factory)
+        transport.connect()
+        factory.lastListener?.onOpen()
+        startedWithItems(factory, "resp_a", "item_a")
+        factory.socket.sent.clear()
+
+        assertTrue(transport.redoResponse("again"))
+        assertEquals(listOf("""{"type":"response.cancel"}"""), factory.socket.sent)
+
+        factory.lastListener?.onMessage("""{"type":"response.done","response":{"id":"resp_a","status":"cancelled"}}""")
+
+        assertEquals(
+            listOf("response.cancel", "conversation.item.delete", "response.create"),
+            factory.socket.sent.map { type(it) },
+        )
+        assertEquals("item_a", MiniJson.string(MiniJson.asObject(MiniJson.parse(factory.socket.sent[1])), "item_id"))
+        val create = MiniJson.asObject(MiniJson.parse(factory.socket.sent[2]))
+        assertEquals("again", MiniJson.string(MiniJson.asObject(create?.get("response")), "instructions"))
+    }
+
+    @Test
+    fun redoOfAResponseAlreadyDoneDeletesItsWordsAndAsksAgainAtOnce() {
+        val factory = FakeFactory()
+        val transport = OpenAiRealtimeTransport(successProvider(), factory)
+        transport.connect()
+        factory.lastListener?.onOpen()
+        startedWithItems(factory, "resp_a", "item_a", "item_b")
+        factory.lastListener?.onMessage("""{"type":"response.done","response":{"id":"resp_a","status":"completed"}}""")
+        factory.socket.sent.clear()
+
+        assertTrue(transport.redoResponse("again"))
+
+        assertEquals(
+            listOf("conversation.item.delete", "conversation.item.delete", "response.create"),
+            factory.socket.sent.map { type(it) },
+        )
+        assertEquals(
+            listOf("item_a", "item_b"),
+            factory.socket.sent.take(2).map { MiniJson.string(MiniJson.asObject(MiniJson.parse(it)), "item_id") },
+        )
+    }
+
+    @Test
+    fun itemsOfAnotherResponseAreNotDeleted() {
+        val factory = FakeFactory()
+        val transport = OpenAiRealtimeTransport(successProvider(), factory)
+        transport.connect()
+        factory.lastListener?.onOpen()
+        startedWithItems(factory, "resp_a", "item_a")
+        factory.lastListener?.onMessage(
+            """{"type":"response.output_item.added","response_id":"resp_old","output_index":0,"item":{"id":"item_old","type":"message"}}""",
+        )
+        factory.lastListener?.onMessage("""{"type":"response.done","response":{"id":"resp_a","status":"completed"}}""")
+        factory.socket.sent.clear()
+
+        transport.redoResponse("again")
+
+        assertEquals(1, factory.socket.sent.count { type(it) == "conversation.item.delete" })
+        assertTrue(factory.socket.sent.none { it.contains("item_old") })
+    }
+
+    @Test
+    fun aNewResponseAskedForWhileARedoWaitsReplacesTheRedo() {
+        val factory = FakeFactory()
+        val transport = OpenAiRealtimeTransport(successProvider(), factory)
+        transport.connect()
+        factory.lastListener?.onOpen()
+        startedWithItems(factory, "resp_a", "item_a")
+        transport.redoResponse("again")
+        factory.socket.sent.clear()
+        transport.sendInstructions("next turn")
+        assertEquals("the redo's cancel was the only one", listOf("response.create"), factory.socket.sent.map { type(it) })
+        factory.socket.sent.clear()
+
+        factory.lastListener?.onMessage("""{"type":"response.done","response":{"id":"resp_a","status":"cancelled"}}""")
+
+        assertTrue("no late delete or create from the dropped redo", factory.socket.sent.isEmpty())
+    }
+
+    @Test
+    fun nothingToRedoBeforeAnyResponse() {
+        val factory = FakeFactory()
+        val transport = OpenAiRealtimeTransport(successProvider(), factory)
+        transport.connect()
+        factory.lastListener?.onOpen()
+        factory.socket.sent.clear()
+
+        assertFalse(transport.redoResponse("again"))
+        assertTrue(factory.socket.sent.isEmpty())
+    }
+
+    @Test
+    fun nothingToRedoAfterTheSocketFailedOrClosed() {
+        for (drop in listOf<(FakeFactory) -> Unit>(
+            { it.lastListener?.onFailure(RuntimeException("sent ping but didn't receive pong")) },
+            { it.lastListener?.onClosed(1006, "abnormal") },
+        )) {
+            val factory = FakeFactory()
+            val transport = OpenAiRealtimeTransport(successProvider(), factory)
+            transport.connect()
+            factory.lastListener?.onOpen()
+            startedWithItems(factory, "resp_a", "item_a")
+
+            drop(factory)
+
+            assertFalse("the dead conversation's response is not redone", transport.redoResponse("again"))
+            assertFalse(transport.dropRedo())
+        }
+    }
+
+    @Test
+    fun theLearnerTalkingWhileARedoWaitsForItsDraftToEndMeansNoRedo() {
+        val factory = FakeFactory()
+        val transport = OpenAiRealtimeTransport(successProvider(), factory)
+        transport.connect()
+        factory.lastListener?.onOpen()
+        startedWithItems(factory, "resp_a", "item_a")
+        transport.redoResponse("again")
+        factory.socket.sent.clear()
+
+        assertFalse("nothing went out yet", transport.dropRedo())
+        factory.lastListener?.onMessage("""{"type":"response.done","response":{"id":"resp_a","status":"cancelled"}}""")
+
+        assertTrue(factory.socket.sent.isEmpty())
+    }
+
+    @Test
+    fun theLearnerTalkingAfterTheRedoWentOutCancelsItOnce() {
+        val factory = FakeFactory()
+        val transport = OpenAiRealtimeTransport(successProvider(), factory)
+        transport.connect()
+        factory.lastListener?.onOpen()
+        startedWithItems(factory, "resp_a", "item_a")
+        factory.lastListener?.onMessage("""{"type":"response.done","response":{"id":"resp_a","status":"completed"}}""")
+        transport.redoResponse("again")
+        factory.socket.sent.clear()
+
+        assertTrue(transport.dropRedo())
+        assertEquals(listOf("response.cancel"), factory.socket.sent.map { type(it) })
+
+        factory.lastListener?.onMessage("""{"type":"response.created","response":{"id":"resp_redo"}}""")
+        assertFalse("its response.created ends the redo", transport.dropRedo())
+        assertEquals(1, factory.socket.sent.size)
+    }
+
+    private fun redoRejected(factory: FakeFactory) = factory.lastListener?.onMessage(
+        """{"type":"error","event_id":"event_x","error":{"type":"invalid_request_error","code":"conversation_already_has_active_response","message":"no","event_id":"${OpenAiRealtimeTransport.REDO_CREATE_EVENT_ID}"}}""",
+    )
+
+    @Test
+    fun aRedoRefusedByTheServerIsReportedAndFreesTheResponseSlot() {
+        val factory = FakeFactory()
+        var rejected = 0
+        val listener = object : OpenAiRealtimeTransport.Listener {
+            override fun onRedoRejected() { rejected++ }
+        }
+        val transport = OpenAiRealtimeTransport(successProvider(), factory, listener = listener)
+        transport.connect()
+        factory.lastListener?.onOpen()
+        startedWithItems(factory, "resp_a", "item_a")
+        factory.lastListener?.onMessage("""{"type":"response.done","response":{"id":"resp_a","status":"completed"}}""")
+        transport.redoResponse("again")
+        val create = MiniJson.asObject(MiniJson.parse(factory.socket.sent.last()))
+        assertEquals(OpenAiRealtimeTransport.REDO_CREATE_EVENT_ID, MiniJson.string(create, "event_id"))
+
+        redoRejected(factory)
+
+        assertEquals(1, rejected)
+        assertFalse("no redo left to drop", transport.dropRedo())
+        factory.socket.sent.clear()
+        transport.sendInstructions("next turn")
+        assertEquals("no response to cancel: the refused create never started one", listOf("response.create"), factory.socket.sent.map { type(it) })
+    }
+
+    @Test
+    fun aRedoRefusedAfterANewerCreateLeavesThatCreatesClaim() {
+        val factory = FakeFactory()
+        var rejected = 0
+        val listener = object : OpenAiRealtimeTransport.Listener {
+            override fun onRedoRejected() { rejected++ }
+        }
+        val transport = OpenAiRealtimeTransport(successProvider(), factory, listener = listener)
+        transport.connect()
+        factory.lastListener?.onOpen()
+        startedWithItems(factory, "resp_a", "item_a")
+        factory.lastListener?.onMessage("""{"type":"response.done","response":{"id":"resp_a","status":"completed"}}""")
+        transport.redoResponse("again")
+        transport.sendInstructions("next turn")
+
+        redoRejected(factory)
+
+        assertEquals("the gate still hears of it", 1, rejected)
+        factory.socket.sent.clear()
+        transport.sendInstructions("one more")
+        assertEquals("the newer create's response is still cancelled first", listOf("response.cancel", "response.create"), factory.socket.sent.map { type(it) })
+    }
+
+    @Test
+    fun onlyTheRedosCreateCarriesTheRedoEventId() {
+        val factory = FakeFactory()
+        val transport = OpenAiRealtimeTransport(successProvider(), factory)
+        transport.connect()
+        factory.lastListener?.onOpen()
+        factory.socket.sent.clear()
+
+        transport.sendInstructions("a turn")
+
+        assertFalse(factory.socket.sent.single().contains(OpenAiRealtimeTransport.REDO_CREATE_EVENT_ID))
+    }
 }

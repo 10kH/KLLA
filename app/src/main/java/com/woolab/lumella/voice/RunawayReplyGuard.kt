@@ -22,7 +22,9 @@ import kotlin.math.sqrt
  *
  * An earlier version cut on "audio without a transcript delta"; measured on spoken replies the
  * transcript runs ahead and the last words arrive up to 3.95 s after it, too close to any
- * threshold that would still catch the hum quickly. Websocket reader thread only.
+ * threshold that would still catch the hum quickly. One thread at a time: the websocket reader, or
+ * the split-reply timer replaying a first part [FirstPartGate] held, under the gate's lock (which the
+ * reader's next delta has to take as well).
  */
 class RunawayReplyGuard(
     private val sampleRateHz: Int = 24_000,

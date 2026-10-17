@@ -156,4 +156,48 @@ class SplitReplyTest {
         firstPartOut(4)
         assertEquals(SplitReply.MAX_UNPLAYED_MS + 1_000L, scheduled.single().first)
     }
+
+    @Test
+    fun onlyTheFirstPartWhileItStreamsIsNamedAsOne() {
+        assertEquals(null, split.speakingFirstPartOf())
+        split.onFirstPartRequested(4)
+        assertEquals("requested, not streaming yet", null, split.speakingFirstPartOf())
+        split.onResponseStarted()
+        assertEquals(4, split.speakingFirstPartOf())
+        split.onCoachAnswered(4, "줄")
+        split.onResponseDone()
+        split.onResponseStarted()
+        assertEquals("the second part is not", null, split.speakingFirstPartOf())
+    }
+
+    @Test
+    fun aRedoneFirstPartIsTheNextResponseAndItsSecondPartFollowsIt() {
+        split.onFirstPartRequested(4)
+        split.onResponseStarted()
+        split.onCoachAnswered(4, "줄")
+
+        split.onFirstPartRedone(3)
+        assertEquals("another turn's redo changes nothing", 4, split.speakingFirstPartOf())
+        split.onFirstPartRedone(4)
+
+        assertEquals(null, split.speakingFirstPartOf())
+        assertFalse("the redo is the first part, not the second", split.onResponseStarted())
+        assertEquals(4, split.speakingFirstPartOf())
+        split.onResponseDone()
+        assertEquals(listOf(4 to "줄"), sent)
+    }
+
+    @Test
+    fun aRedoThatCouldNotBeAskedForLeavesTheDraftAsTheFirstPart() {
+        split.onFirstPartRequested(4)
+        split.onResponseStarted()
+        split.onCoachAnswered(4, "줄")
+        split.onFirstPartRedone(4)
+
+        split.onFirstPartRedoFailed(4)
+
+        assertEquals(4, split.speakingFirstPartOf())
+        split.onResponseDone()
+        assertEquals(listOf(4 to "줄"), sent)
+    }
 }

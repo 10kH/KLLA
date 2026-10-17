@@ -81,6 +81,12 @@ class OpenAiRealtimeTransport(
         fun onResponseDone() {}
 
         /**
+         * The server refused a [redoResponse]'s response.create (an `error` echoing
+         * [REDO_CREATE_EVENT_ID]): no response will come for it.
+         */
+        fun onRedoRejected() {}
+
+        /**
          * A new response began streaming. This is the boundary that separates a dying
          * response's late deltas from the next reply's first ones — without it the app cannot
          * tell them apart, and a barge-in's in-flight fragment can overwrite the subtitle the
@@ -249,6 +255,9 @@ class OpenAiRealtimeTransport(
          */
         internal const val SESSION_UPDATE_EVENT_ID = "lumella_session_update"
 
+        /** `event_id` stamped on a [redoResponse]'s response.create, so its rejection is recognized. */
+        internal const val REDO_CREATE_EVENT_ID = "lumella_redo_create"
+
         private val defaultIdleExecutor: java.util.concurrent.ScheduledExecutorService by lazy {
             java.util.concurrent.Executors.newSingleThreadScheduledExecutor(
                 java.util.concurrent.ThreadFactory { r ->
@@ -313,6 +322,19 @@ class OpenAiRealtimeTransport(
     /** Serializes the cancel-then-create pair emitted by [sendInstructions] and
      *  [requestResponseContinuation] so the two calls can never interleave — see [responseActive]. */
     private val responseEmitLock = Any()
+
+    /** The last response.created's id and the conversation items it added, for [redoResponse]. Under [responseEmitLock]. */
+    private var lastResponseId: String? = null
+    private val lastResponseItems = ArrayList<String>()
+
+    /** A [redoResponse] waiting for its cancelled response's response.done. Under [responseEmitLock]. */
+    private var pendingRedo: Pair<String, String>? = null
+
+    /**
+     * A redo's response.create has gone out and no response.created, rejection or other
+     * response.create has come since. Under [responseEmitLock].
+     */
+    private var redoInFlight = false
 
     /** True once [close] (client teardown or idle-timeout) has run and no [connect] has followed. Lets
      *  [com.woolab.lumella.MainActivity] tell "not ready because reconnecting" from "not ready because
@@ -440,6 +462,7 @@ class OpenAiRealtimeTransport(
                     responseActive.set(false)
                     activeResponseId = null
                     toolCallResponseId = null
+                    synchronized(responseEmitLock) { resetRedoLocked() }
                     listener.onStatus(RealtimeConnectionStatus.DEGRADED)
                     listener.onError(t.message ?: t.javaClass.simpleName)
                     scheduleReconnect()
@@ -471,8 +494,67 @@ class OpenAiRealtimeTransport(
             if (responseActive.getAndSet(false)) sendRaw("""{"type":"response.cancel"}""") else false
         }
 
-    private fun emitCancelThenCreate(instructions: String, shouldCancel: (activeId: String?) -> Boolean): Boolean =
+    /**
+     * Asks again for the last response, its own words taken out of the conversation first: cancels it
+     * if it is still generating, waits for its response.done, deletes the items it added and sends a
+     * `response.create` for [instructions]. For a draft the learner never heard ([FirstPartGate]):
+     * left in the conversation, the cut-off words are what the new response carries on from (aaai27
+     * 2026-10-17: "떡볶이가 엄청 맵" then "었군요!"). False with no response to redo. A create the server
+     * refuses comes back as [Listener.onRedoRejected], after the draft's items are gone.
+     */
+    fun redoResponse(instructions: String): Boolean =
         synchronized(responseEmitLock) {
+            val target = lastResponseId ?: return false
+            // Cleared here as every cancel does, so a turn starting meanwhile does not cancel it twice.
+            if (activeResponseId == target && responseActive.getAndSet(false)) {
+                pendingRedo = target to instructions
+                sendRaw("""{"type":"response.cancel"}""")
+            } else {
+                finishRedo(instructions)
+            }
+        }
+
+    private fun finishRedo(instructions: String): Boolean {
+        lastResponseItems.forEach { sendRaw(buildItemDeleteJson(it)) }
+        lastResponseItems.clear()
+        return emitCancelThenCreate(instructions, REDO_CREATE_EVENT_ID) { false }.also { redoInFlight = it }
+    }
+
+    /**
+     * The learner started talking before a [redoResponse] was heard: no redo. True when its
+     * response.create had already gone out; it is cancelled here (the server takes the cancel after
+     * the create, as for any turn's cancel-then-create) and the caller drops what of it still arrives.
+     */
+    fun dropRedo(): Boolean =
+        synchronized(responseEmitLock) {
+            when {
+                pendingRedo != null -> { pendingRedo = null; false }
+                redoInFlight -> {
+                    if (responseActive.getAndSet(false)) sendRaw("""{"type":"response.cancel"}""")
+                    true
+                }
+                else -> false
+            }
+        }
+
+    /** Under [responseEmitLock]: a new socket carries no response to redo. */
+    private fun resetRedoLocked() {
+        lastResponseId = null
+        lastResponseItems.clear()
+        pendingRedo = null
+        redoInFlight = false
+    }
+
+    private fun emitCancelThenCreate(
+        instructions: String,
+        eventId: String? = null,
+        shouldCancel: (activeId: String?) -> Boolean,
+    ): Boolean =
+        synchronized(responseEmitLock) {
+            // Any new response replaces a redo still waiting for its cancelled response to end,
+            // and one already asked for is no longer the last create (see the ERROR branch).
+            pendingRedo = null
+            redoInFlight = false
             if (shouldCancel(activeResponseId) && responseActive.getAndSet(false)) {
                 sendRaw("""{"type":"response.cancel"}""")
             }
@@ -484,7 +566,7 @@ class OpenAiRealtimeTransport(
             // and coach paths run on separate queues this is genuinely reachable: a tool-call
             // refusal answers on the websocket reader thread while a turn publishes on the
             // voice queue.
-            val sent = sendRaw(buildResponseCreateJson(instructions))
+            val sent = sendRaw(buildResponseCreateJson(instructions, eventId))
             if (sent) {
                 responseActive.set(true)
                 // The id must go with the claim. Left in place it still names the response
@@ -538,6 +620,9 @@ class OpenAiRealtimeTransport(
         }
         return sent
     }
+
+    internal fun buildItemDeleteJson(itemId: String): String =
+        """{"type":"conversation.item.delete","item_id":${jsonString(itemId)}}"""
 
     internal fun buildTextItemJson(text: String, role: String = "user"): String =
         """{"type":"conversation.item.create","item":{"type":"message","role":${jsonString(role)},""" +
@@ -704,6 +789,7 @@ class OpenAiRealtimeTransport(
         // one. Left behind, they would let a stale match skip a cancel that is needed.
         activeResponseId = null
         toolCallResponseId = null
+        synchronized(responseEmitLock) { resetRedoLocked() }
         if (closedByClient) return
         listener.onStatus(RealtimeConnectionStatus.CLOSED)
         scheduleReconnect()
@@ -834,7 +920,19 @@ class OpenAiRealtimeTransport(
             RealtimeServerEventKind.RESPONSE_CREATED -> {
                 listener.onResponseStarted()
                 responseActive.set(true)
-                activeResponseId = MiniJson.string(MiniJson.asObject(obj["response"]), "id")
+                val id = MiniJson.string(MiniJson.asObject(obj["response"]), "id")
+                activeResponseId = id
+                synchronized(responseEmitLock) {
+                    lastResponseId = id
+                    lastResponseItems.clear()
+                    redoInFlight = false
+                }
+            }
+            RealtimeServerEventKind.RESPONSE_OUTPUT_ITEM_ADDED -> {
+                val itemId = MiniJson.string(MiniJson.asObject(obj["item"]), "id")
+                synchronized(responseEmitLock) {
+                    if (itemId != null && MiniJson.string(obj, "response_id") == lastResponseId) lastResponseItems.add(itemId)
+                }
             }
             RealtimeServerEventKind.RESPONSE_DONE -> {
                 // A response.done for an older response must not clear the flag for the one
@@ -846,6 +944,12 @@ class OpenAiRealtimeTransport(
                     activeResponseId = null
                 }
                 listener.onResponseDone()
+                synchronized(responseEmitLock) {
+                    pendingRedo?.takeIf { it.first == doneId }?.let { (_, instructions) ->
+                        pendingRedo = null
+                        finishRedo(instructions)
+                    }
+                }
             }
             RealtimeServerEventKind.ERROR -> {
                 if (isFatalAccountError(text)) {
@@ -857,13 +961,22 @@ class OpenAiRealtimeTransport(
                     closedByClient = true
                     listener.onStatus(RealtimeConnectionStatus.ACCOUNT_BLOCKED)
                 }
-                if (MiniJson.string(MiniJson.asObject(obj["error"]), "event_id") == SESSION_UPDATE_EVENT_ID) {
+                val errorEventId = MiniJson.string(MiniJson.asObject(obj["error"]), "event_id")
+                if (errorEventId == SESSION_UPDATE_EVENT_ID) {
                     // The server rejected the one session.update we sent on open — same
                     // "Ready but on server defaults" failure as an incomplete session.updated,
                     // just surfaced from the error side instead of the confirmation side.
                     listener.onStatus(RealtimeConnectionStatus.DEGRADED)
                 }
                 listener.onError(text)
+                if (errorEventId == REDO_CREATE_EVENT_ID) {
+                    synchronized(responseEmitLock) {
+                        // Still the last create: the slot it claimed holds no response.
+                        if (redoInFlight && activeResponseId == null) responseActive.set(false)
+                        redoInFlight = false
+                    }
+                    listener.onRedoRejected()
+                }
             }
             else -> Unit
         }
@@ -945,12 +1058,14 @@ class OpenAiRealtimeTransport(
         return """{"type":"session.update","event_id":${jsonString(SESSION_UPDATE_EVENT_ID)},"session":$session}"""
     }
 
-    internal fun buildResponseCreateJson(instructions: String): String =
-        if (instructions.isBlank()) {
-            """{"type":"response.create"}"""
+    internal fun buildResponseCreateJson(instructions: String, eventId: String? = null): String {
+        val id = eventId?.let { ""","event_id":${jsonString(it)}""" }.orEmpty()
+        return if (instructions.isBlank()) {
+            """{"type":"response.create"$id}"""
         } else {
-            """{"type":"response.create","response":{"instructions":${jsonString(instructions)}}}"""
+            """{"type":"response.create"$id,"response":{"instructions":${jsonString(instructions)}}}"""
         }
+    }
 
     internal fun buildAudioAppendJson(base64Pcm16: String): String =
         """{"type":"input_audio_buffer.append","audio":${jsonString(base64Pcm16)}}"""

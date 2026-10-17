@@ -61,6 +61,25 @@ class SplitReply(
         else -> false
     }
 
+    /** The turn whose first part is the response now streaming, or null ([FirstPartGate]). */
+    @Synchronized
+    fun speakingFirstPartOf(): Int? = turnId.takeIf { phase == Phase.FIRST_SPEAKING }
+
+    /**
+     * [FirstPartGate] dropped [turnId]'s first part unheard and asked for it again: the next
+     * response.created is the first part. The dropped one's response.done never reaches here.
+     */
+    @Synchronized
+    fun onFirstPartRedone(turnId: Int) {
+        if (turnId == this.turnId && phase == Phase.FIRST_SPEAKING) phase = Phase.FIRST_REQUESTED
+    }
+
+    /** The redo for [turnId] could not be asked for: the draft plays after all and is the first part. */
+    @Synchronized
+    fun onFirstPartRedoFailed(turnId: Int) {
+        if (turnId == this.turnId && phase == Phase.FIRST_REQUESTED) phase = Phase.FIRST_SPEAKING
+    }
+
     /** response.done. Only the first part's own done counts; a cancelled predecessor's is ignored. */
     fun onResponseDone() {
         val wait: Long

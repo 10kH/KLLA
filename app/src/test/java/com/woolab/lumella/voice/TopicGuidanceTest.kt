@@ -146,4 +146,17 @@ class TopicGuidanceTest {
         assertTrue(t.contains("ending the conversation"))
         assertTrue(t.contains("ask nothing more"))
     }
+
+    @Test
+    fun theSlipNoteNamesEverySlipWithItsFixAndAsksForTheWholeSentenceBack() {
+        val note = TopicGuidance.slipNote(LearnerSlips.find("시장에 떡볶이를 먹었어요. 너무 맵었어요."))
+
+        assertEquals(
+            "THEIR SENTENCE HAS A SLIP, already checked: " +
+                "\"시장에\" should be \"시장에서\" (the place where you do something takes 에서, not 에); " +
+                "\"맵었어요\" should be \"매웠어요\" (맵다 drops its ㅂ: 매워요, 매웠어요). " +
+                "Your recast says their WHOLE sentence back with it fixed, never their words as they said them.",
+            note,
+        )
+    }
 }
