@@ -405,6 +405,30 @@ adb shell cmd wifi add-network <SSID> wpa2 '<비밀번호>'
 계정·인증서를 받을 자리가 없다. 연구소는 주변이 전부 EAP에 SSID도 숨겨져 있어
 **폰 핫스팟이 유일한 경로였다.**
 
+**이제는 도우미 앱 `netsetup`으로 넣는다** (2026-10-16~17 확인). targetSdk 28로 빌드한 화면 없는
+앱(`com.woolab.klla.netsetup`, 모듈 `netsetup/`)이라 예전 `WifiManager.addNetwork`/`enableNetwork`를
+쓸 수 있고, 그래서 EAP·숨은 SSID도 넣는다. 로그는 태그 `KllaNet`, 비밀번호는 남기지 않는다.
+
+```bash
+adb install -r netsetup/build/outputs/apk/debug/netsetup-debug.apk
+adb shell am start -W -n com.woolab.klla.netsetup/.WifiActivity --es op add --es ssid '<SSID>' --es psk '<비밀번호>'
+adb shell am start -W -n com.woolab.klla.netsetup/.WifiActivity --es op add --es ssid '<SSID>' \
+  --ez hidden true --es identity '<계정>' --es password '<비밀번호>'      # PEAP/MSCHAPv2
+adb shell am start -W -n com.woolab.klla.netsetup/.WifiActivity --es op remove --ei id <N>   # 이 앱이 넣은 망만
+adb shell am start -W -n com.woolab.klla.netsetup/.WifiActivity --es op wifi-on
+adb logcat -d -s KllaNet:I | tail -1     # 결과: id, enabled / ok
+```
+
+- `add`는 기본으로 바로 연결한다(`--ez connect false`로 끌 수 있음). 다른 저장 망은 그동안 비활성이고,
+  `remove`하면 저장된 다른 망으로 돌아간다(10/17: 3초 안에 5 GHz 망으로 복귀).
+- 실제 연결 확인 10/17: PSK 망을 넣자 안경이 그 망(이 앱의 net id)에 붙어 주소를 받고, KLLA가 그 망으로 한
+  턴을 돌렸다(음성 TTFA 717 ms, 코치 턴 3.5초). EAP는 넣기까지만 확인했고 실제 연구소 망에 붙여 보진
+  않았다.
+- shell이나 다른 앱이 넣은 망은 `remove` 못 한다(예상대로). shell이 넣은 망은
+  `cmd wifi forget-network N`으로 지운다.
+- RayNeo 런처가 뒤로 간 앱을 강제 종료하므로 명령은 하나씩 `am start -W`로 보내고, 2초 뒤 로그를 본다.
+- device owner 방식은 안경에 계정(`com.rayneo.account` 등)이 있어 쓸 수 없다.
+
 ---
 
 ## 11. 1인칭 영상은 앱 안에서 찍는다
