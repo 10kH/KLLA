@@ -131,6 +131,13 @@ class AudioPlayback(private val sampleRateHz: Int = 24_000) {
         }.apply { isDaemon = true; name = "lumella-drain-check" }.start()
     }
 
+    /** Audio handed to the track that the speaker has not played yet, in ms; 0 with no track. */
+    fun unplayedMs(): Long {
+        val track = audioTrack ?: return 0L
+        val head = track.playbackHeadPosition.toLong() and 0xFFFF_FFFFL
+        return (framesWritten - head).coerceAtLeast(0L) * 1000 / sampleRateHz
+    }
+
     private fun checkDrained(writtenAtEnd: Long): String {
         val track = audioTrack ?: return "perf: drain track=none"
         // playbackHeadPosition is an unsigned 32-bit frame count that wraps; a take is far
@@ -224,6 +231,9 @@ class AudioPlayback(private val sampleRateHz: Int = 24_000) {
         runCatching {
             track.pause()
             track.flush()
+            // The dropped audio will never play: nothing is unplayed now, whether or not this
+            // device resets the head on flush.
+            framesWritten = track.playbackHeadPosition.toLong() and 0xFFFF_FFFFL
         }
     }
 

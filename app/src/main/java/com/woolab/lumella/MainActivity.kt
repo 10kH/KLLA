@@ -42,10 +42,12 @@ import com.woolab.lumella.voice.OkHttpRealtimeWebSocketFactory
 import com.woolab.lumella.voice.OpenAiRealtimeTransport
 import com.woolab.lumella.voice.RealtimeConnectionStatus
 import com.woolab.lumella.voice.RunawayReplyGuard
+import com.woolab.lumella.voice.SplitReply
 import com.woolab.lumella.voice.TopicGuidance
 import com.woolab.lumella.voice.TopicMemory
 import com.woolab.lumella.voice.VoiceFastPath
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import org.json.JSONObject
 
@@ -101,6 +103,10 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
         private const val DEBUG_REC_STOP_ACTION = "com.woolab.lumella.DEBUG_REC_STOP"
         private const val DEBUG_OPENER_ACTION = "com.woolab.lumella.DEBUG_OPENER"
         private const val HOLD_OPENER_FILE = "hold-opener"
+        /** Present (ops/launch-lumella.sh --split): topic replies in two parts, see [SplitReply]. */
+        private const val SPLIT_REPLY_FILE = "split-reply"
+        /** Split reply: silence the learner may hear after the first part while Tango is still out. */
+        private const val SPLIT_EXTRA_WAIT_MS = 1_000L
         /** Two taps, each allowed 2s to drain ([WavTap.close]). */
         private const val TAP_CLOSE_WAIT_MS = 4_500L
         /** This app's own tutoring language, per `switch_tutor_language`'s own-language check. */
@@ -160,6 +166,12 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
      * writes it — so a topic survives the relaunches of a shoot day. See [TopicGuidance].
      */
     @Volatile private var sessionTopic: String? = null
+
+    /** Topic replies in two parts (split-reply launch flag), or null for the lagged guide. */
+    private var splitReply: SplitReply? = null
+    private val splitTimer = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "lumella-split-reply").apply { isDaemon = true }
+    }
 
     /** The topic differs from the last launch's: start a fresh luma session instead of resuming. */
     @Volatile private var topicChanged = false
@@ -347,6 +359,24 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
         }
         if (openerHeld) Log.i(TAG, "첫 질문 보류 (take.sh --opener 신호를 기다림)")
         runCatching { lastTopicFile.writeText(sessionTopic ?: "") }
+        splitReply = if (java.io.File(getExternalFilesDir(null), SPLIT_REPLY_FILE).isFile) {
+            SplitReply(
+                extraWaitMs = SPLIT_EXTRA_WAIT_MS,
+                schedule = { ms, action -> splitTimer.schedule(action, ms, TimeUnit.MILLISECONDS) },
+                unplayedMs = { audioPlayback.unplayedMs() },
+                sendSecond = { turnId, line ->
+                    voicePathExecutor.execute {
+                        if (voiceFastPath.sendSecondPart(turnId, line) && line != null) {
+                            Log.i(TAG, "주제 유도 적용 turn $turnId ← 코치 turn $turnId (같은 턴): $line")
+                        }
+                    }
+                },
+                log = { Log.i(TAG, it) },
+            )
+        } else {
+            null
+        }
+        Log.i(TAG, if (splitReply != null) "나눠 답하기: 켬 (Tango 줄을 같은 턴에)" else "나눠 답하기: 끔 (Tango 줄은 다음 턴에)")
 
         // BaseMirrorActivity inflates ActivityMainBinding per-eye into mBindingPair — no
         // setContentView() here (see LEGACY TUTOR/ELLA MainActivity, same base class).
@@ -514,6 +544,7 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                 }
 
                 override fun onToolCall(name: String, callId: String, arguments: String) {
+                    splitReply?.onToolCall()
                     // Display/language tools are routed BEFORE capturePolicy.decide: that
                     // policy only knows capture_photo and would Refuse anything else, which
                     // would answer the model with the wrong error instead of running the tool.
@@ -549,6 +580,7 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
 
                 override fun onSpeechStarted() {
                     Log.i(TAG, "음성 감지됨 (VAD)")
+                    splitReply?.onLearnerSpeech()
                     handleSpeechStarted()
                 }
 
@@ -582,9 +614,13 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
 
                 override fun onResponseDone() {
                     settleTopicContinuation()
+                    splitReply?.onResponseDone()
                 }
 
                 override fun onResponseStarted() {
+                    // The second part of a split reply continues the first on screen: the first
+                    // part's audio is usually still playing when the second part starts.
+                    val secondPart = splitReply?.onResponseStarted() == true
                     responseSpoke = false
                     runawayGuard.onResponseStarted()
                     Log.d(TAG, "응답 경계: 억제 해제 + 리셋")
@@ -597,7 +633,11 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                         // HERE rather than at speech start — the response boundary also covers
                         // turn shapes with no speech start at all (tool continuations).
                         tutorDeltasSuppressed = false
-                        subtitleAccumulator.setLength(0)
+                        if (secondPart) {
+                            if (subtitleAccumulator.isNotEmpty()) subtitleAccumulator.append(' ')
+                        } else {
+                            subtitleAccumulator.setLength(0)
+                        }
                     }
                 }
 
@@ -634,6 +674,7 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
             sessionId = { sessionIdRef.get() },
             personaSummary = OpenAiRealtimeTransport.DEFAULT_SESSION_INSTRUCTIONS,
             topic = { sessionTopic },
+            splitReply = splitReply,
         )
 
         audioCapture = AudioCapture(
@@ -1387,9 +1428,11 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                 // The topic tutor's own next line, for the edit: the film shows it next to the
                 // voice's reply that took its direction ('주제 유도 적용 turn N ← 코치 turn M').
                 if (sessionTopic != null) {
-                    (runCatching { brain.fetchSteering(sessionIdRef.get()) }.getOrNull() as? SteeringResult.Available)
+                    val line = (runCatching { brain.fetchSteering(sessionIdRef.get()) }.getOrNull() as? SteeringResult.Available)
                         ?.evidence?.takeIf { it.sourceTurnId == turnId }?.topicGuide
-                        ?.let { Log.i(TAG, "주제 코치 turn $turnId: $it") }
+                    line?.let { Log.i(TAG, "주제 코치 turn $turnId: $it") }
+                    // A split reply's second part waits for exactly this (null: the coach gave no line).
+                    splitReply?.onCoachAnswered(turnId, line)
                 }
                 // A connect to an address that does not refuse hangs to the transport's 20s
                 // timeout. That is what "unreachable" means; a slow coach turn is not it.
@@ -1408,6 +1451,8 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
                 if (turnId == turnTracker.current()) runOnUiThread { updateHint(indicator) }
             }
         } else {
+            // No coach to wait for: a split reply's second part goes as soon as the first is out.
+            splitReply?.onCoachAnswered(turnId, null)
             runOnUiThread { updateHint(null) }
         }
     }
@@ -1800,6 +1845,7 @@ class MainActivity : BaseMirrorActivity<ActivityMainBinding>() {
         }
         brainSubmitExecutor.shutdown()
         slowPathExecutor.shutdown()
+        splitTimer.shutdownNow()
         voicePathExecutor.shutdown()
     }
 

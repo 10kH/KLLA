@@ -15,9 +15,20 @@ import java.io.File
  *
  * During the conversation luma routes on-topic turns to its topic tutor, ETRI Tango, prompted with
  * the topic and the running conversation; Tango's reply is its next line for the topic. The voice
- * the learner hears stays the realtime model (it answers in ~0.7 s; a coach turn takes seconds), so
- * Tango leads one turn behind: its line for turn N sets the direction of the voice's reply at turn
- * N+1. Off-topic turns go to GPT and carry no guide; the voice answers them and comes back.
+ * the learner hears stays the realtime model (it answers in ~0.7 s; a coach turn takes seconds).
+ * Two ways to put Tango's line into the conversation:
+ *
+ * - Lagged (default): Tango leads one turn behind; its line for turn N sets the direction of the
+ *   voice's reply at turn N+1. Judged no better than no guide at all (aaai27 tango_use_probe.py,
+ *   2026-10-16: lagged vs none 33 vs 32 of 75 blind).
+ * - Split ([SplitReply], the `split-reply` launch flag): the reply comes in two parts. The voice
+ *   says the recast (or the answer to a question) at once, and while it speaks Tango's line for
+ *   THIS sentence comes back; the second part is one question in its direction. Judged better than
+ *   lagged 51 of 75 (same probe). Possible since the coach turn stopped running the quality gate
+ *   (KLLA-server #28, 2026-10-17: coach turn median 5.7 s -> 2.6 s, while the voice's reply to a
+ *   sentence ends ~5.1 s after it on the glasses, lt8 median of 21).
+ *
+ * Off-topic turns go to GPT and carry no guide; the voice answers them and comes back.
  *
  * Recast stays first: the persona's recast rule is not replaced, the topic only decides where the
  * reply goes after it.
@@ -42,6 +53,21 @@ object TopicGuidance {
             "take the conversation in that direction — use its question, in your own short words and in the " +
             "learner's politeness level. Do not read it out word for word. If the learner has just asked about " +
             "something else, answer that first; use this direction only to come back to the topic."
+
+    /**
+     * The first part of a split reply ([SplitReply]): the recast or the answer, no question. A learner
+     * question still gets its answer here; the way back to the topic is the second part's job.
+     */
+    const val SPLIT_FIRST =
+        "RIGHT NOW say ONLY the first part of your reply, one short sentence and no question: your recast or " +
+            "expansion of the learner's last sentence or, if the learner asked you something, a short answer to it. " +
+            "A second part follows separately."
+
+    /** The second part of a split reply: one question, in the topic tutor's direction when its line came back. */
+    const val SPLIT_SECOND =
+        "You have just said the first part of your reply (your recast, or your answer to the learner's question). " +
+            "Now say ONE short question that continues the conversation, spoken words only: no tool call, no " +
+            "function name, no JSON, no topic label. Do not repeat or rephrase what you just said."
 
     /** How a conversation opens; each has its own first words (see [openingInstruction]). */
     enum class Opening { CHOOSE, ON_TOPIC, WELCOME_BACK }

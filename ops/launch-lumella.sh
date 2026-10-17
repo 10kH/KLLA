@@ -17,6 +17,9 @@
 #   ops/launch-lumella.sh --topic "어제 친구와 한 일을 말해요"   # topic-guided conversation
 #   ops/launch-lumella.sh --no-topic # back to an open conversation (the tutor asks what to talk about)
 #   ops/launch-lumella.sh --no-topic --hold-opener   # ... but only when take.sh --opener says so
+#   ops/launch-lumella.sh --split    # topic replies in two parts: recast now, then Tango's question
+#                                    # for the same sentence (voice/SplitReply.kt); --no-split: back
+#                                    # to Tango's line steering the next turn. Kept until changed.
 #
 # The topic lives in topic.txt in the app's external files dir and is read at launch, so it
 # survives relaunches until --no-topic; setting or clearing it restarts the app.
@@ -25,19 +28,22 @@ set -uo pipefail
 S="${ANDROID_SERIAL:-A06B4A043084773}"
 PKG="com.woolab.lumella"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RESET=0; TOPIC_SET=0; TOPIC=""; HOLD=0
+RESET=0; TOPIC_SET=0; TOPIC=""; HOLD=0; SPLIT_SET=0; SPLIT=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --reset) RESET=1 ;;
     --topic) TOPIC_SET=1; TOPIC="${2:?--topic needs a topic}"; shift ;;
     --no-topic) TOPIC_SET=1; TOPIC="" ;;
     --hold-opener) HOLD=1 ;;
+    --split) SPLIT_SET=1; SPLIT=1 ;;
+    --no-split) SPLIT_SET=1; SPLIT=0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
 done
 TOPIC_PATH="/storage/emulated/0/Android/data/$PKG/files/topic.txt"
 HOLD_PATH="/storage/emulated/0/Android/data/$PKG/files/hold-opener"
+SPLIT_PATH="/storage/emulated/0/Android/data/$PKG/files/split-reply"
 
 # lumella and ELLA fight over the mic; the later one wins silently.
 adb -s "$S" shell pidof com.woolab.ella >/dev/null 2>&1 && {
@@ -67,7 +73,18 @@ if [ "$HOLD" = 1 ]; then
   adb -s "$S" shell "touch $HOLD_PATH" >/dev/null 2>&1 && echo "  opening question held for take.sh --opener"
 fi
 
-if [ "$RESET" = 1 ] || [ "$TOPIC_SET" = 1 ] || [ "$HOLD" = 1 ]; then
+if [ "$SPLIT_SET" = 1 ]; then
+  # Read at launch and kept, like topic.txt.
+  if [ "$SPLIT" = 1 ]; then
+    adb -s "$S" shell "touch $SPLIT_PATH" >/dev/null 2>&1
+    adb -s "$S" shell "test -f $SPLIT_PATH" >/dev/null 2>&1 || { echo "  split-reply flag did not land on the glasses" >&2; exit 1; }
+    echo "  split reply: on (Tango's line for the same sentence)"
+  else
+    adb -s "$S" shell "rm -f $SPLIT_PATH" >/dev/null 2>&1; echo "  split reply: off (Tango's line steers the next turn)"
+  fi
+fi
+
+if [ "$RESET" = 1 ] || [ "$TOPIC_SET" = 1 ] || [ "$HOLD" = 1 ] || [ "$SPLIT_SET" = 1 ]; then
   adb -s "$S" shell am force-stop "$PKG" >/dev/null 2>&1
   if [ "$RESET" = 1 ]; then
     adb -s "$S" shell "run-as $PKG rm -f files/learner-state.json files/learner-state.json.tmp files/recent-topics.txt files/last-topic.txt" 2>/dev/null

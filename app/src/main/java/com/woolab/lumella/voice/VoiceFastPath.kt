@@ -43,7 +43,13 @@ class VoiceFastPath(
     private val fetchSteeringTimeoutMs: Long = 1_500L,
     /** The session's conversation topic, or null for an open conversation (see [TopicGuidance]). */
     private val topic: () -> String? = { null },
+    /** Topic replies in two parts with Tango's line for the current sentence; null = the lagged guide. */
+    private val splitReply: SplitReply? = null,
 ) {
+
+    /** The current split turn and its instructions minus the part note, kept for [sendSecondPart]. */
+    @Volatile
+    private var splitTurn: Pair<Int, String>? = null
 
     /** The topic tutor's line applied at the last turn start: (turn, source turn, line); for the log. */
     @Volatile
@@ -71,22 +77,47 @@ class VoiceFastPath(
         val evidence = fetchSteering(currentTurnId)
         val steeringText = evidence?.let { composeSteeringText(it) }
         val sessionTopic = topic()?.takeIf { it.isNotBlank() }
-        val guide = if (sessionTopic != null && evidence != null) {
+        val split = splitReply?.takeIf { sessionTopic != null }
+        // A split turn gets Tango's line for THIS sentence in its second part; the line for the
+        // previous sentence would only pull the reply backwards.
+        val guide = if (split == null && sessionTopic != null && evidence != null) {
             TopicGuidance.freshGuide(evidence.topicGuide, evidence.sourceTurnId, currentTurnId)
         } else {
             null
         }
         lastAppliedTopicGuide = guide?.let { Triple(currentTurnId, evidence!!.sourceTurnId, it) }
-        val combinedText = listOfNotNull(
+        val base = listOfNotNull(
             instructions.text,
             steeringText,
             sessionTopic?.let { TopicGuidance.topicInstruction(it) },
-            guide?.let { TopicGuidance.guideInstruction(it) },
         ).filter { it.isNotBlank() }.joinToString("\n")
 
-        transport.sendInstructions(combinedText)
+        if (split != null) {
+            splitTurn = currentTurnId to base
+            split.onFirstPartRequested(currentTurnId)
+            transport.sendInstructions(base + "\n" + TopicGuidance.SPLIT_FIRST)
+        } else {
+            splitTurn = null
+            transport.sendInstructions(listOfNotNull(base, guide?.let { TopicGuidance.guideInstruction(it) })
+                .filter { it.isNotBlank() }.joinToString("\n"))
+        }
         orchestrator.commitDelivery(instructions)
         return instructions
+    }
+
+    /**
+     * The second part of split turn [turnId] ([SplitReply]): the turn's own instructions, Tango's
+     * [line] for this sentence when it came back, and [TopicGuidance.SPLIT_SECOND]. False, sending
+     * nothing, when a later turn has started (its first part is what the learner should hear).
+     */
+    fun sendSecondPart(turnId: Int, line: String?): Boolean {
+        val (turn, base) = splitTurn ?: return false
+        if (turn != turnId) return false
+        splitTurn = null
+        lastAppliedTopicGuide = line?.let { Triple(turnId, turnId, it) }
+        transport.sendInstructions(listOfNotNull(base, line?.let { TopicGuidance.guideInstruction(it) }, TopicGuidance.SPLIT_SECOND)
+            .joinToString("\n"))
+        return true
     }
 
     /** Fire-and-forget submission of this turn's evidence to the brain's slow path. */

@@ -46,6 +46,7 @@ class VoiceFastPathTest {
         brain: TutorBrain,
         transport: RealtimeTransport = RecordingTransport(),
         topic: String? = null,
+        splitReply: SplitReply? = null,
     ) = VoiceFastPath(
         orchestrator = StateGraphOrchestrator(TutorLanguage.KOREAN, LearnerStateStore(), StalenessGuard(2, 4), AblationMode.FULL),
         brain = brain,
@@ -53,7 +54,19 @@ class VoiceFastPathTest {
         sessionId = { "s1" },
         personaSummary = "You are KLLA.",
         topic = { topic },
+        splitReply = splitReply,
     )
+
+    /** A [SplitReply] wired straight back into [voice], as MainActivity wires it (minus the queues). */
+    private class SplitWiring {
+        lateinit var voice: VoiceFastPath
+        val split = SplitReply(
+            extraWaitMs = 1_000L,
+            schedule = { _, _ -> },
+            unplayedMs = { 0L },
+            sendSecond = { turn, line -> voice.sendSecondPart(turn, line) },
+        )
+    }
 
     private fun guideFrom(turn: Int, line: String) = ScriptedBrain({
         SteeringResult.Available(
@@ -88,6 +101,67 @@ class VoiceFastPathTest {
         assertFalse(transport.sent.single().contains("어떤 커피 마셨나요?"))
         assertTrue("the topic itself still applies", transport.sent.single().contains("어제 친구와 한 일을 말해요"))
         assertEquals(null, voice.lastAppliedTopicGuide)
+    }
+
+    // --- split reply: the recast now, Tango's question for the same sentence after it ---
+
+    @Test
+    fun aSplitTurnSendsTheFirstPartWithoutTheLaggedLineThenTheSecondWithThisTurnsLine() {
+        val transport = RecordingTransport()
+        val wiring = SplitWiring()
+        val voice = fastPath(guideFrom(3, "turn 3 줄"), transport, topic = "어제 친구와 한 일을 말해요", splitReply = wiring.split)
+        wiring.voice = voice
+
+        voice.onTurnStart(currentTurnId = 4)
+
+        val first = transport.sent.single()
+        assertTrue(first.endsWith(TopicGuidance.SPLIT_FIRST))
+        assertTrue("the topic still applies", first.contains("어제 친구와 한 일을 말해요"))
+        assertFalse("the previous sentence's line would pull the reply backwards", first.contains("turn 3 줄"))
+        assertEquals(null, voice.lastAppliedTopicGuide)
+
+        wiring.split.onResponseStarted()
+        wiring.split.onCoachAnswered(4, "어떤 커피 마셨나요?")
+        wiring.split.onResponseDone()
+
+        val second = transport.sent[1]
+        assertTrue(second.contains(TopicGuidance.guideInstruction("어떤 커피 마셨나요?")))
+        assertTrue(second.endsWith(TopicGuidance.SPLIT_SECOND))
+        assertFalse(second.contains(TopicGuidance.SPLIT_FIRST))
+        assertTrue("same persona and topic as the first part", second.startsWith(first.removeSuffix(TopicGuidance.SPLIT_FIRST).trimEnd()))
+        assertEquals(Triple(4, 4, "어떤 커피 마셨나요?"), voice.lastAppliedTopicGuide)
+        assertEquals(2, transport.sent.size)
+    }
+
+    @Test
+    fun aSecondPartForATurnThatHasBeenOvertakenIsNotSent() {
+        val transport = RecordingTransport()
+        val wiring = SplitWiring()
+        val voice = fastPath(guideFrom(3, "x"), transport, topic = "주제", splitReply = wiring.split)
+        wiring.voice = voice
+
+        voice.onTurnStart(currentTurnId = 4)
+        voice.onTurnStart(currentTurnId = 5)
+
+        assertFalse(voice.sendSecondPart(4, "turn 4 줄"))
+        assertTrue(voice.sendSecondPart(5, null))
+        assertFalse("once per turn", voice.sendSecondPart(5, null))
+        assertEquals(3, transport.sent.size)
+        assertTrue(transport.sent[2].endsWith(TopicGuidance.SPLIT_SECOND))
+        assertFalse(transport.sent[2].contains("proposed this next line"))
+    }
+
+    @Test
+    fun withoutATopicASplitReplyIsNotUsed() {
+        val transport = RecordingTransport()
+        val wiring = SplitWiring()
+        val voice = fastPath(guideFrom(3, "x"), transport, topic = null, splitReply = wiring.split)
+        wiring.voice = voice
+
+        voice.onTurnStart(currentTurnId = 4)
+
+        assertFalse(transport.sent.single().contains(TopicGuidance.SPLIT_FIRST))
+        assertFalse(voice.sendSecondPart(4, null))
     }
 
     @Test
